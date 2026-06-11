@@ -16,6 +16,9 @@ import type { InvestAssessment, InvestCriterion } from '../engines/invest.js';
 const MODEL = process.env.QE_AI_MODEL ?? 'claude-sonnet-4-6';
 
 export function aiAvailable(): boolean {
+  // QE_DISABLE_AI=1 forces the deterministic template path (used by e2e tests
+  // so they stay fast, free, and repeatable even when a key is configured).
+  if (process.env.QE_DISABLE_AI === '1') return false;
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 

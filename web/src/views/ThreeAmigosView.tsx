@@ -8,17 +8,21 @@ export default function ThreeAmigosView() {
   const [evals, setEvals] = useState<Record<string, ThreeAmigosEvaluation>>({});
   const [messages, setMessages] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   const refresh = () => api.stories().then(setStories).catch((e) => setError(String(e)));
   useEffect(() => { refresh(); }, []);
 
   const evaluate = async (id: string) => {
+    setBusy((b) => ({ ...b, [id]: true }));
     try {
       const ev = await api.threeAmigosEvaluate(id);
       setEvals((prev) => ({ ...prev, [id]: ev }));
       setMessages((prev) => ({ ...prev, [id]: ev.message }));
     } catch (e) {
       setError(String(e));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
     }
   };
 
@@ -71,7 +75,9 @@ export default function ThreeAmigosView() {
               <span className="badge muted">{s.status.replaceAll('_', ' ')}</span>
             </h3>
             {!ev ? (
-              <button className="action" onClick={() => evaluate(s.id)}>Evaluate story</button>
+              <button className="action" onClick={() => evaluate(s.id)} disabled={busy[s.id]}>
+                {busy[s.id] ? 'Evaluating with AI — takes up to a minute…' : 'Evaluate story'}
+              </button>
             ) : (
               <>
                 <p>
@@ -133,7 +139,9 @@ export default function ThreeAmigosView() {
                       Mark 3 Amigos Complete
                     </button>
                   )}{' '}
-                  <button className="action" onClick={() => evaluate(s.id)}>Re-evaluate</button>
+                  <button className="action" onClick={() => evaluate(s.id)} disabled={busy[s.id]}>
+                    {busy[s.id] ? 'Re-evaluating…' : 'Re-evaluate'}
+                  </button>
                 </p>
               </>
             )}

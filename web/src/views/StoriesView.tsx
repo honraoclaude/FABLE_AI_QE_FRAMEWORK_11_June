@@ -13,6 +13,16 @@ export default function StoriesView() {
   const [jira, setJira] = useState<{ configured: boolean; hint: string | null } | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [invest, setInvest] = useState<Record<string, InvestAssessment>>({});
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+
+  const withPending = async (key: string, fn: () => Promise<void>) => {
+    setPending((p) => ({ ...p, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setPending((p) => ({ ...p, [key]: false }));
+    }
+  };
 
   useEffect(() => {
     api.stories().then(setStories).catch((e) => setError(String(e)));
@@ -30,32 +40,35 @@ export default function StoriesView() {
     }
   };
 
-  const checkDor = async (id: string) => {
-    try {
-      const { result } = await api.dor(id);
-      setDor((prev) => ({ ...prev, [id]: result }));
-    } catch (e) {
-      setError(String(e));
-    }
-  };
+  const checkDor = (id: string) =>
+    withPending(`dor-${id}`, async () => {
+      try {
+        const { result } = await api.dor(id);
+        setDor((prev) => ({ ...prev, [id]: result }));
+      } catch (e) {
+        setError(String(e));
+      }
+    });
 
-  const checkInvest = async (id: string) => {
-    try {
-      const a = await api.invest(id);
-      setInvest((prev) => ({ ...prev, [id]: a }));
-    } catch (e) {
-      setError(String(e));
-    }
-  };
+  const checkInvest = (id: string) =>
+    withPending(`invest-${id}`, async () => {
+      try {
+        const a = await api.invest(id);
+        setInvest((prev) => ({ ...prev, [id]: a }));
+      } catch (e) {
+        setError(String(e));
+      }
+    });
 
-  const generateAc = async (id: string) => {
-    try {
-      const { scenarios: list } = await api.generateAc(id);
-      setScenarios((prev) => ({ ...prev, [id]: list }));
-    } catch (e) {
-      setError(String(e));
-    }
-  };
+  const generateAc = (id: string) =>
+    withPending(`ac-${id}`, async () => {
+      try {
+        const { scenarios: list } = await api.generateAc(id);
+        setScenarios((prev) => ({ ...prev, [id]: list }));
+      } catch (e) {
+        setError(String(e));
+      }
+    });
 
   return (
     <section className="panel">
@@ -112,7 +125,9 @@ export default function StoriesView() {
                       )}
                     </>
                   ) : (
-                    <button className="action" onClick={() => checkDor(s.id)}>Check DoR</button>
+                    <button className="action" onClick={() => checkDor(s.id)} disabled={pending[`dor-${s.id}`]}>
+                      {pending[`dor-${s.id}`] ? 'Checking…' : 'Check DoR'}
+                    </button>
                   )}
                 </td>
                 <td>
@@ -125,11 +140,15 @@ export default function StoriesView() {
                       {invest[s.id]!.verdict}
                     </span>
                   ) : (
-                    <button className="action" onClick={() => checkInvest(s.id)}>Check INVEST</button>
+                    <button className="action" onClick={() => checkInvest(s.id)} disabled={pending[`invest-${s.id}`]}>
+                      {pending[`invest-${s.id}`] ? 'Assessing with AI…' : 'Check INVEST'}
+                    </button>
                   )}
                 </td>
                 <td>
-                  <button className="action" onClick={() => generateAc(s.id)}>Generate AC</button>
+                  <button className="action" onClick={() => generateAc(s.id)} disabled={pending[`ac-${s.id}`]}>
+                    {pending[`ac-${s.id}`] ? 'Generating with AI…' : 'Generate AC'}
+                  </button>
                 </td>
               </tr>
             );
