@@ -1,0 +1,71 @@
+# CI quality gates — QE Framework §10.1, §16
+# Gate order: typecheck → unit tests → SAST (Semgrep) → build → P1 smoke + axe (Playwright)
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: Typecheck + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test --workspace=server
+
+  sast:
+    name: SAST — Semgrep (per PR, §10.1)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep ci --config auto
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+  e2e:
+    name: P1 smoke + accessibility (Playwright + axe)
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace=web
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npm run test --workspace=e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+
+  lighthouse:
+    name: Performance budget — Lighthouse CI (per release, §16)
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace=web
+      - run: npx --yes @lhci/cli autorun
+        env:
+          QE_SEED: '1'

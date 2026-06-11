@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.claude/settings.local.json
+qe_framework_extracted.txt
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+playwright-report/
+test-results/
+coverage/
+.lighthouseci/

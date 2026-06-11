@@ -1,0 +1,32 @@
+# DAST — OWASP ZAP baseline scan per release (QE Framework §10.1).
+# Runs against staging when the STAGING_URL repository variable is set;
+# also triggerable manually with an explicit target.
+
+name: dast
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target URL to scan (defaults to STAGING_URL variable)'
+        required: false
+  release:
+    types: [published]
+
+jobs:
+  zap-baseline:
+    name: OWASP ZAP baseline
+    runs-on: ubuntu-latest
+    if: ${{ inputs.target != '' || vars.STAGING_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ inputs.target || vars.STAGING_URL }}
+          allow_issue_writing: false
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: report_html.html
