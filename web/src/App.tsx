@@ -3,12 +3,14 @@ import StoriesView from './views/StoriesView';
 import ThreeAmigosView from './views/ThreeAmigosView';
 import RisksView from './views/RisksView';
 import RbtView from './views/RbtView';
+import ProductOwnerView from './views/ProductOwnerView';
 import RegressionView from './views/RegressionView';
 import GoNoGoView from './views/GoNoGoView';
 import MetricsView from './views/MetricsView';
 
 const TABS = [
   { id: 'stories', label: 'Story Pipeline' },
+  { id: 'po', label: 'Product Owner' },
   { id: 'amigos', label: '3 Amigos' },
   { id: 'risks', label: 'Product Risk Register' },
   { id: 'rbt', label: 'RBT Testing Approach' },
@@ -45,6 +47,7 @@ export default function App() {
 
       <main id={`panel-${tab}`} role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label}>
         {tab === 'stories' && <StoriesView />}
+        {tab === 'po' && <ProductOwnerView />}
         {tab === 'amigos' && <ThreeAmigosView />}
         {tab === 'risks' && <RisksView />}
         {tab === 'rbt' && <RbtView />}

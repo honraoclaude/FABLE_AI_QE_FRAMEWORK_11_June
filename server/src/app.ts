@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, Repo } from './db.js';
 import { buildRouter } from './routes.js';
+import { buildPoRouter } from './po-routes.js';
 import { seedIfEmpty } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,7 @@ export function createApp(dbFile?: string): express.Express {
   const app = express();
   app.use(express.json());
   app.use('/api', buildRouter(repo));
+  app.use('/api/po', buildPoRouter());
 
   // Serve the built React dashboard when present.
   const webDist = path.join(__dirname, '..', '..', 'web', 'dist');

@@ -30,6 +30,17 @@ test.describe('P1 smoke: portal core journeys', () => {
     await expect(page.getByText('Given', { exact: false }).first()).toBeVisible();
   });
 
+  test('Product Owner backlog hub loads and switches sub-views', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('tab', { name: 'Product Owner' }).click();
+    await expect(page.getByRole('heading', { name: /Backlog Intelligence Hub/ })).toBeVisible();
+    // Overview KPIs render from the scored backlog
+    await expect(page.getByText('Total stories')).toBeVisible();
+    // Switch to a sub-view that exercises a POST endpoint
+    await page.getByRole('tab', { name: 'Sprint Builder' }).click();
+    await expect(page.getByText(/weeks selected/)).toBeVisible();
+  });
+
   test('3 Amigos evaluator raises owned actions', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('tab', { name: '3 Amigos' }).click();

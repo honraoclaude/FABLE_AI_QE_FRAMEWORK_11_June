@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 
 const TABS = [
   'Story Pipeline',
+  'Product Owner',
   '3 Amigos',
   'Product Risk Register',
   'RBT Testing Approach',
