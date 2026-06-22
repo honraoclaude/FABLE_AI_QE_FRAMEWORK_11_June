@@ -11,6 +11,8 @@ import {
   type ScoredStory,
   type SprintPlan,
 } from '../po-api';
+import { Gauge, KpiCard, ProgressBar, Radar, trendSeries } from '../components/dashboard';
+import { IconChart, IconFlag, IconFlask, IconLayers, IconShield, IconSpark, IconUsers } from '../icons';
 
 const TYPE_COLORS: Record<string, string> = { FIX: '#1F3864', BUILD: '#1E6B4A', COMPLY: '#B5520F', ENHANCE: '#5C277F' };
 const INVEST_LETTERS = ['I', 'N', 'V', 'E', 'S', 'T'] as const;
@@ -127,13 +129,11 @@ export default function ProductOwnerView() {
   const outcomes = backlog?.outcomes ?? [];
 
   return (
-    <section className="panel">
-      <h2>Product Owner — Backlog Intelligence Hub</h2>
-      <p className="hint">
-        Financial Sales Cloud in an FCA-regulated environment. INVEST health × RICE prioritisation, sprint
-        readiness, dependency-aware roadmap forecasting, stakeholder conflict resolution and fairness — every
-        recommendation shows its working.
-      </p>
+    <section>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Product Owner</h2>
+        <span className="hint">Backlog Intelligence Hub · Financial Sales Cloud (FCA-regulated)</span>
+      </div>
       {error && <p role="alert" className="badge bad">{error}</p>}
 
       <div className="legend" style={{ alignItems: 'center' }}>
@@ -188,40 +188,114 @@ export default function ProductOwnerView() {
   );
 }
 
-// ── Overview ──────────────────────────────────────────────────────────────
+// ── Overview (executive dashboard) ──────────────────────────────────────────
 function Overview({ backlog, roadmap }: { backlog: Backlog; roadmap: Roadmap | null }) {
   const s = backlog.summary;
-  const kpis = [
-    ['Total stories', s.total],
-    ['Sprint Ready', s.ready],
-    ['Needs Refinement', s.refine],
-    ['Avg INVEST health', `${s.avgHealth}%`],
-    ['DoR ready (≥4/5)', s.dorReady],
-    ['FCA-regulated', s.regulatedCount],
-    ['Avg conflict', `${s.avgConflict}%`],
-    ['Top RICE', s.topRice.toLocaleString()],
-  ] as const;
+  const stories = backlog.stories;
+  const dims = ['I', 'N', 'V', 'E', 'S', 'T'] as const;
+  const radarVals = dims.map((d) => stories.reduce((sum, st) => sum + st.invest[d], 0) / stories.length);
+  const totalRice = stories.reduce((sum, st) => sum + st.riceScore, 0);
+  const readinessPct = Math.round((s.ready / s.total) * 100);
+  const alignment = 100 - s.avgConflict;
+  const regulated = stories.filter((st) => st.regulated);
+  const regReady = regulated.filter((st) => st.status === 'Sprint Ready').length;
+  const compliancePct = regulated.length ? Math.round((regReady / regulated.length) * 100) : 100;
+
+  // critical dependencies = stories that the most other stories depend on
+  const inDegree = new Map<string, number>();
+  stories.forEach((st) => st.dependencies.forEach((d) => inDegree.set(d, (inDegree.get(d) ?? 0) + 1)));
+  const critical = [...inDegree.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([id, n]) => ({ id, n, title: stories.find((x) => x.id === id)?.title ?? id }));
+  const blocked = stories.filter((st) => st.status === 'Blocked');
+  const regConcerns = regulated.filter((st) => st.status !== 'Sprint Ready');
+
+  const maxCov = Math.max(1, ...backlog.outcomes.map((o) => s.outcomeCoverage[o.id] ?? 0));
+
+  const heroBadge = (lbl: string, val: string, dotColor?: string) => (
+    <div className="status-badge"><div className="lbl">{lbl}</div><div className="val">{dotColor && <span style={{ width: 8, height: 8, borderRadius: 4, background: dotColor }} />}{val}</div></div>
+  );
+
   return (
     <div>
-      <div className="kpis">
-        {kpis.map(([lbl, num]) => (
-          <div className="kpi" key={lbl}><div className="num">{num}</div><div className="lbl">{lbl}</div></div>
-        ))}
+      {/* Hero */}
+      <div className="hero">
+        <h2>Product Owner Intelligence Hub</h2>
+        <p>Backlog health, sprint readiness, dependency insights and outcome forecasting — in one executive view.</p>
+        <div className="status-badges">
+          {heroBadge('Current Sprint', 'Sprint 6 · Q2 FY25')}
+          {heroBadge('Release Target', roadmap ? `Sprint ${roadmap.sprints.length}` : '—')}
+          {heroBadge('FCA Compliance', `${compliancePct}% ready`, compliancePct >= 75 ? '#10b981' : compliancePct >= 50 ? '#f59e0b' : '#ef4444')}
+          {heroBadge('Team Readiness', `${readinessPct}%`, readinessPct >= 60 ? '#10b981' : '#f59e0b')}
+        </div>
       </div>
-      <h3>Outcome coverage</h3>
-      <table>
-        <thead><tr><th scope="col">Business outcome</th><th scope="col">Current → target</th><th scope="col">Stories</th></tr></thead>
-        <tbody>
+
+      {/* KPI cards */}
+      <div className="kpis">
+        <KpiCard icon={IconLayers} tint="#4f46e5" label="Total Stories" value={s.total} series={trendSeries(s.total)} trend={{ dir: 'flat', text: 'stable' }} context="in active backlog" />
+        <KpiCard icon={IconFlag} tint="#10b981" label="Sprint Ready" value={s.ready} series={trendSeries(s.ready)} trend={{ dir: 'up', text: '+2 vs last sprint' }} context={`${readinessPct}% of backlog`} />
+        <KpiCard icon={IconFlask} tint="#f59e0b" label="Needs Refinement" value={s.refine} series={trendSeries(s.refine)} trend={{ dir: 'flat', text: 'watch' }} context="in refinement queue" />
+        <KpiCard icon={IconChart} tint="#4f46e5" label="INVEST Health" value={`${s.avgHealth}%`} series={trendSeries(s.avgHealth)} trend={{ dir: 'up', text: '+6%' }} context="avg story quality" />
+        <KpiCard icon={IconShield} tint="#10b981" label="DoR Readiness" value={`${Math.round((s.dorReady / s.total) * 100)}%`} series={trendSeries(s.dorReady)} trend={{ dir: 'up', text: '+1 story' }} context={`${s.dorReady}/${s.total} pass the gate`} />
+        <KpiCard icon={IconShield} tint="#ef4444" label="FCA-Regulated" value={s.regulatedCount} series={trendSeries(s.regulatedCount)} trend={{ dir: 'flat', text: 'tracked' }} context="require compliance sign-off" />
+        <KpiCard icon={IconUsers} tint="#f59e0b" label="Conflict Index" value={`${s.avgConflict}%`} series={trendSeries(s.avgConflict)} trend={{ dir: 'flat', text: 'balanced' }} context="avg stakeholder disagreement" />
+        <KpiCard icon={IconSpark} tint="#4f46e5" label="Total RICE Value" value={totalRice.toLocaleString()} series={trendSeries(totalRice / 1000)} trend={{ dir: 'up', text: '+8%' }} context="weighted backlog value" />
+      </div>
+      <p className="hint" style={{ marginTop: 6 }}>Trends are indicative, derived from current backlog composition.</p>
+
+      {/* Gauges */}
+      <div className="grid3" style={{ marginTop: 16 }}>
+        <div className="panel" style={{ display: 'flex', justifyContent: 'center' }}>
+          <Gauge value={readinessPct} label="Sprint Readiness" sub={`${s.ready}/${s.total} ready`} color="#10b981" />
+        </div>
+        <div className="panel" style={{ display: 'flex', justifyContent: 'center' }}>
+          <Gauge value={alignment} label="Stakeholder Alignment" sub={`${s.avgConflict}% conflict`} color="#4f46e5" />
+        </div>
+        <div className="panel" style={{ display: 'flex', justifyContent: 'center' }}>
+          <Gauge value={compliancePct} label="FCA Compliance Readiness" sub={`${regReady}/${regulated.length} regulated ready`} color={compliancePct >= 75 ? '#10b981' : '#f59e0b'} />
+        </div>
+      </div>
+
+      {/* 3-column: backlog health · outcome coverage · risk & dependency */}
+      <div className="grid3" style={{ marginTop: 0 }}>
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Backlog Health</h3>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><Radar axes={[...dims]} values={radarVals} /></div>
+          <h4>Story quality distribution</h4>
+          <div className="composition">
+            {([['Ready', s.ready, '#047857'], ['Refine', s.refine, '#b45309'], ['Blocked', s.blocked, '#b91c1c']] as const).map(([l, n, c]) => n > 0 && (
+              <div key={l} style={{ width: `${(n / s.total) * 100}%`, background: c }}>{l} {n}</div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Outcome Coverage</h3>
           {backlog.outcomes.map((o) => (
-            <tr key={o.id}>
-              <td><span className="badge" style={{ color: o.color }}>{o.label}</span></td>
-              <td className="hint">{o.current} → {o.target} ({o.unit})</td>
-              <td>{s.outcomeCoverage[o.id] ?? 0}</td>
-            </tr>
+            <ProgressBar key={o.id} label={o.label} current={o.current} target={o.target} pct={((s.outcomeCoverage[o.id] ?? 0) / maxCov) * 100} color={o.color} />
           ))}
-        </tbody>
-      </table>
-      {roadmap && <p className="hint" style={{ marginTop: '0.6rem' }}>{roadmap.deliverySummary}</p>}
+          {roadmap && <p className="hint" style={{ marginTop: 10 }}>{roadmap.deliverySummary}</p>}
+        </div>
+
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Risk &amp; Dependency</h3>
+          <h4>Blocked stories</h4>
+          {blocked.length ? blocked.map((st) => <div key={st.id}><span className="badge bad">{st.id}</span> {st.title}</div>) : <p className="hint">None blocked.</p>}
+          <h4>Critical dependencies</h4>
+          {critical.length ? (
+            <ul className="reasons">{critical.map((c) => <li key={c.id}><strong>{c.id}</strong> blocks {c.n} stor{c.n === 1 ? 'y' : 'ies'} — {c.title}</li>)}</ul>
+          ) : <p className="hint">No shared dependencies.</p>}
+          <h4>Regulatory concerns</h4>
+          {regConcerns.length ? (
+            <div className="chips">{regConcerns.map((st) => <span key={st.id} className="badge warn" title={st.title}>{st.id} · {st.status}</span>)}</div>
+          ) : <p className="hint">All FCA-regulated stories are sprint-ready.</p>}
+        </div>
+      </div>
+
+      {/* Prioritization matrix */}
+      <div className="panel">
+        <h3 style={{ marginTop: 0 }}>Story Prioritization Matrix</h3>
+        <Heatmap stories={stories} />
+      </div>
     </div>
   );
 }

@@ -8,11 +8,11 @@ const TABS = [
   'Story Pipeline',
   'Product Owner',
   '3 Amigos',
-  'Product Risk Register',
-  'RBT Testing Approach',
+  'Risk Register',
+  'RBT Testing',
   'Regression Pack',
   'Go / No-Go',
-  'Quality Metrics',
+  'Metrics',
 ];
 
 test.describe('WCAG 2.1 AA — automated axe-core scan', () => {

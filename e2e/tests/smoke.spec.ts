@@ -12,7 +12,7 @@ test.describe('P1 smoke: portal core journeys', () => {
 
   test('story pipeline loads with seeded stories', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'QE Portal' })).toBeVisible();
+    await expect(page.getByText('QE Intelligence Portal')).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Story Pipeline' })).toBeVisible();
     await expect(page.getByRole('table').first()).toBeVisible();
   });
@@ -30,12 +30,12 @@ test.describe('P1 smoke: portal core journeys', () => {
     await expect(page.getByText('Given', { exact: false }).first()).toBeVisible();
   });
 
-  test('Product Owner backlog hub loads and switches sub-views', async ({ page }) => {
+  test('Product Owner dashboard loads and switches sub-views', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('tab', { name: 'Product Owner' }).click();
-    await expect(page.getByRole('heading', { name: /Backlog Intelligence Hub/ })).toBeVisible();
-    // Overview KPIs render from the scored backlog
-    await expect(page.getByText('Total stories')).toBeVisible();
+    // Executive hero + premium KPI cards render from the scored backlog
+    await expect(page.getByRole('heading', { name: 'Product Owner Intelligence Hub' })).toBeVisible();
+    await expect(page.getByText('INVEST Health')).toBeVisible();
     // Switch to a sub-view that exercises a POST endpoint
     await page.getByRole('tab', { name: 'Sprint Builder' }).click();
     await expect(page.getByText(/weeks selected/)).toBeVisible();
@@ -50,13 +50,13 @@ test.describe('P1 smoke: portal core journeys', () => {
 
   test('risk register renders scored risks', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('tab', { name: 'Product Risk Register' }).click();
+    await page.getByRole('tab', { name: 'Risk Register' }).click();
     await expect(page.getByRole('heading', { name: 'Product Risk Register' })).toBeVisible();
   });
 
   test('RBT framework generates from product context', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('tab', { name: 'RBT Testing Approach' }).click();
+    await page.getByRole('tab', { name: 'RBT Testing' }).click();
     await page.getByLabel('Product name').fill('PayFlow');
     await page.getByLabel('Key business processes (comma-separated)').fill('Onboarding, Payments');
     await page.getByLabel('Key integrations (comma-separated)').fill('Stripe');
