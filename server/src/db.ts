@@ -20,6 +20,7 @@ export function openDb(file?: string): Database.Database {
     CREATE TABLE IF NOT EXISTS defects   (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS tests     (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS rbt_frameworks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS po_state (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_scenarios_story ON scenarios(story_id);
   `);
   return db;
@@ -96,6 +97,20 @@ export class Repo {
   listRbtFrameworks<T>(): T[] {
     const rows = this.db.prepare('SELECT data FROM rbt_frameworks').all() as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as T);
+  }
+
+  // --- Product Owner synced backlog (single-row key/value) ---
+  savePoState<T>(key: string, value: T): void {
+    this.db
+      .prepare('INSERT INTO po_state (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(key, JSON.stringify(value));
+  }
+  getPoState<T>(key: string): T | null {
+    const row = this.db.prepare('SELECT data FROM po_state WHERE id = ?').get(key) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as T) : null;
+  }
+  clearPoState(key: string): void {
+    this.db.prepare('DELETE FROM po_state WHERE id = ?').run(key);
   }
 
   // --- regression test cases ---

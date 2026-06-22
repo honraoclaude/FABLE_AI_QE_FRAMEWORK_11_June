@@ -66,6 +66,17 @@ export interface Backlog {
   stories: ScoredStory[];
   summary: BacklogSummary;
   outcomes: Outcome[];
+  source: 'jira' | 'sample';
+  syncedAt: string | null;
+}
+
+export interface JiraPoStatus {
+  configured: boolean;
+  jql: string | null;
+  source: 'jira' | 'sample';
+  syncedAt: string | null;
+  count: number;
+  hint: string | null;
 }
 
 export interface RoadmapSprint {
@@ -165,6 +176,9 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 export const po = {
   backlog: () => get<Backlog>('/backlog'),
+  jiraStatus: () => get<JiraPoStatus>('/jira/status'),
+  jiraSync: () => post<{ synced: number; jql: string; source: string }>('/jira/sync', {}),
+  jiraReset: () => post<{ source: string; count: number }>('/jira/reset', {}),
   roadmap: (capacity: number) => get<Roadmap>(`/roadmap?capacity=${capacity}`),
   sprint: (selectedIds: string[], capacity: number) => post<SprintPlan>('/sprint', { selectedIds, capacity }),
   scenarios: (capacity: number) => get<Scenario[]>(`/scenarios?capacity=${capacity}`),

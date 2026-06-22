@@ -4,6 +4,7 @@ import {
   type Backlog,
   type ConflictResolution,
   type Fairness,
+  type JiraPoStatus,
   type Refinement,
   type Roadmap,
   type Scenario,
@@ -59,6 +60,9 @@ export default function ProductOwnerView() {
   const [refinements, setRefinements] = useState<Record<string, Refinement>>({});
   const [conflicts, setConflicts] = useState<ConflictResolution[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [jira, setJira] = useState<JiraPoStatus | null>(null);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const [capacity, setCapacity] = useState(10);
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
@@ -66,21 +70,58 @@ export default function ProductOwnerView() {
   const [selected, setSelected] = useState<string[]>([]);
   const [plan, setPlan] = useState<SprintPlan | null>(null);
 
-  useEffect(() => {
+  const reloadAll = () => {
     po.backlog().then(setBacklog).catch((e) => setError(String(e)));
-    po.fairness().then(setFairness).catch(() => undefined);
     po.refinements().then(setRefinements).catch(() => undefined);
     po.conflicts().then(setConflicts).catch(() => undefined);
+    po.jiraStatus().then(setJira).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    reloadAll();
+    po.fairness().then(setFairness).catch(() => undefined);
   }, []);
 
+  const syncJira = async () => {
+    setSyncing(true);
+    setSyncMsg('Syncing from Jira…');
+    try {
+      const r = await po.jiraSync();
+      setSyncMsg(`Synced ${r.synced} issues from Jira (JQL: ${r.jql})`);
+      setSelected([]);
+      reloadAll();
+    } catch (e) {
+      setSyncMsg(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const resetSample = async () => {
+    setSyncing(true);
+    try {
+      await po.jiraReset();
+      setSyncMsg('Reset to the built-in sample backlog');
+      setSelected([]);
+      reloadAll();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Re-derive capacity-dependent views when capacity changes OR the backlog
+  // source changes (sync / reset), keyed on source+syncedAt.
+  const backlogKey = `${backlog?.source ?? ''}:${backlog?.syncedAt ?? ''}`;
   useEffect(() => {
     po.roadmap(capacity).then(setRoadmap).catch(() => undefined);
     po.scenarios(capacity).then(setScenarios).catch(() => undefined);
-  }, [capacity]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capacity, backlogKey]);
 
   useEffect(() => {
     po.sprint(selected, capacity).then(setPlan).catch(() => undefined);
-  }, [selected, capacity]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, capacity, backlogKey]);
 
   const stories = backlog?.stories ?? [];
   const outcomes = backlog?.outcomes ?? [];
@@ -94,6 +135,25 @@ export default function ProductOwnerView() {
         recommendation shows its working.
       </p>
       {error && <p role="alert" className="badge bad">{error}</p>}
+
+      <div className="legend" style={{ alignItems: 'center' }}>
+        {backlog?.source === 'jira' ? (
+          <span className="badge ok">Synced from Jira · {backlog.stories.length} stories{backlog.syncedAt ? ` · ${new Date(backlog.syncedAt).toLocaleString()}` : ''}</span>
+        ) : (
+          <span className="badge muted">Sample backlog (Financial Sales Cloud)</span>
+        )}
+        {jira?.configured ? (
+          <button className="action" onClick={syncJira} disabled={syncing}>
+            {syncing ? 'Syncing…' : 'Sync from Jira'}
+          </button>
+        ) : (
+          <span className="hint">Jira sync not configured — {jira?.hint ?? 'set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN (and optionally JIRA_PO_JQL)'}</span>
+        )}
+        {backlog?.source === 'jira' && (
+          <button className="action" onClick={resetSample} disabled={syncing}>Reset to sample</button>
+        )}
+        {syncMsg && <span className="hint" role="status">{syncMsg}</span>}
+      </div>
 
       <nav className="subtabs" role="tablist" aria-label="Product Owner views">
         {SUBTABS.map(([id, label]) => (
@@ -585,6 +645,9 @@ function Conflicts({ conflicts }: { conflicts: ConflictResolution[] }) {
   return (
     <div>
       <p className="hint">High-conflict stories with each stakeholder's position, two resolution options, and a recommended path.</p>
+      {conflicts.length === 0 && (
+        <p className="hint">No authored conflict resolutions for the current backlog. These are hand-authored for the sample backlog; for Jira-synced stories, use the Tension Board to see computed stakeholder conflict, or generate resolutions with the AI layer.</p>
+      )}
       {conflicts.map((c) => (
         <div className="panel" key={c.storyId} style={{ marginBottom: '0.7rem' }}>
           <h4>{c.storyId} {c.title} <span className="badge bad">{c.conflictIdx}% conflict</span></h4>

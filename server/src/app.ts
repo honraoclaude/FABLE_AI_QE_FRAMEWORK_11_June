@@ -16,7 +16,7 @@ export function createApp(dbFile?: string): express.Express {
   const app = express();
   app.use(express.json());
   app.use('/api', buildRouter(repo));
-  app.use('/api/po', buildPoRouter());
+  app.use('/api/po', buildPoRouter(repo));
 
   // Serve the built React dashboard when present.
   const webDist = path.join(__dirname, '..', '..', 'web', 'dist');
