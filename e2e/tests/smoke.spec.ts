@@ -12,19 +12,34 @@ test.describe('P1 smoke: portal core journeys', () => {
 
   test('story pipeline loads with seeded stories', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('QE Intelligence Portal')).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Story Pipeline' })).toBeVisible();
+    await expect(page.getByText('QE Intelligence Portal').first()).toBeVisible();
+    await page.getByRole('tab', { name: 'Story Pipeline' }).click();
     await expect(page.getByRole('table').first()).toBeVisible();
+  });
+
+  test('executive dashboard renders hero, KPIs and pipeline flow', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'QE Intelligence Portal' })).toBeVisible();
+    await expect(page.getByText('Quality Health', { exact: true })).toBeVisible();
+    await expect(page.getByText('Delivery Pipeline')).toBeVisible();
+  });
+
+  test('AI insights computes findings from live data', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('tab', { name: 'AI Insights' }).click();
+    await expect(page.getByText(/Predicted release risk/)).toBeVisible();
   });
 
   test('DoR check produces a scored result with owner-assigned gaps', async ({ page }) => {
     await page.goto('/');
+    await page.getByRole('tab', { name: 'Story Pipeline' }).click();
     await page.getByRole('button', { name: 'Check DoR' }).first().click();
     await expect(page.locator('.badge.bad, .badge.warn, .badge.ok').first()).toBeVisible();
   });
 
   test('AC generation produces Gherkin scenarios', async ({ page }) => {
     await page.goto('/');
+    await page.getByRole('tab', { name: 'Story Pipeline' }).click();
     await page.getByRole('button', { name: 'Generate AC' }).first().click();
     await expect(page.getByRole('heading', { name: /Acceptance Criteria/ })).toBeVisible();
     await expect(page.getByText('Given', { exact: false }).first()).toBeVisible();

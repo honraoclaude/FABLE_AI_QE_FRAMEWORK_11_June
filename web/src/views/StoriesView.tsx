@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type DorResult, type InvestAssessment, type Scenario, type Story } from '../api';
+import { Flow } from '../components/dashboard';
+import { stageCounts } from './DashboardView';
 
 const statusLabel = (s: string) => s.replaceAll('_', ' ');
 
@@ -15,6 +17,8 @@ export default function StoriesView() {
   const [invest, setInvest] = useState<Record<string, InvestAssessment>>({});
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [pushMsg, setPushMsg] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const withPending = async (key: string, fn: () => Promise<void>) => {
     setPending((p) => ({ ...p, [key]: true }));
@@ -81,12 +85,22 @@ export default function StoriesView() {
       }
     });
 
+  const visible = useMemo(
+    () =>
+      stories.filter(
+        (s) =>
+          (statusFilter === 'all' || s.status === statusFilter) &&
+          (query === '' || `${s.title} ${s.jiraKey ?? ''} ${s.module}`.toLowerCase().includes(query.toLowerCase())),
+      ),
+    [stories, query, statusFilter],
+  );
+  const statuses = [...new Set(stories.map((s) => s.status))];
+
   return (
     <section className="panel">
       <h2>Story Pipeline</h2>
-      <p className="hint">
-        Stories flow Backlog → DoR gates → 3 Amigos → AC generation → Dev → dual DoD verification → Release.
-      </p>
+      <p className="hint">Shift-left lifecycle: every story passes each quality gate before release.</p>
+      <Flow stages={stageCounts(stories)} />
       <p>
         {jira?.configured ? (
           <button className="action" onClick={syncJira}>Sync from Jira</button>
@@ -98,6 +112,14 @@ export default function StoriesView() {
         {syncMsg && <span className="hint" role="status"> {syncMsg}</span>}
       </p>
       {error && <p role="alert" className="badge bad">{error}</p>}
+      <div className="legend">
+        <input placeholder="Search stories…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search stories" />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+          <option value="all">All statuses</option>
+          {statuses.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
+        </select>
+        <span>{visible.length} of {stories.length}</span>
+      </div>
       <table>
         <caption className="hint">All stories with lifecycle status and quality gates</caption>
         <thead>
@@ -112,7 +134,7 @@ export default function StoriesView() {
           </tr>
         </thead>
         <tbody>
-          {stories.map((s) => {
+          {visible.map((s) => {
             const d = dor[s.id];
             return (
               <tr key={s.id}>

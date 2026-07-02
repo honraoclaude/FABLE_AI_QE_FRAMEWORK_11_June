@@ -1,7 +1,33 @@
 // Reusable SVG data-visualisation primitives for the executive dashboard.
 // Zero-dependency — all hand-rolled SVG so the bundle stays lean.
+// Chart text/grid use CSS variables so both light and dark themes render correctly.
 
-import type { ComponentType, ReactNode, SVGProps } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
+
+const INK = 'var(--ink-strong)';
+const MUTED = 'var(--muted)';
+const GRID = 'var(--line)';
+
+/** Animated count-up for KPI values. */
+export function useCountUp(target: number, durationMs = 700): number {
+  const [value, setValue] = useState(target);
+  const from = useRef(0);
+  useEffect(() => {
+    const start = performance.now();
+    const initial = from.current;
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setValue(initial + (target - initial) * eased);
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else from.current = target;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, durationMs]);
+  return value;
+}
 
 // ── Sparkline ───────────────────────────────────────────────────────────────
 export function Sparkline({ data, color = '#4f46e5', w = 96, h = 28 }: { data: number[]; color?: string; w?: number; h?: number }) {
@@ -70,10 +96,10 @@ export function Gauge({ value, max = 100, label, sub, color = '#4f46e5', size = 
   return (
     <div style={{ textAlign: 'center' }}>
       <svg width={size} height={size} role="img" aria-label={`${label}: ${value} of ${max}`}>
-        <path d={arc(start, end)} fill="none" stroke="#e2e8f0" strokeWidth={11} strokeLinecap="round" />
+        <path d={arc(start, end)} fill="none" stroke={GRID} strokeWidth={11} strokeLinecap="round" />
         <path d={arc(start, start + (end - start) * frac)} fill="none" stroke={color} strokeWidth={11} strokeLinecap="round" />
-        <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight={800} fill="#0f172a">{Math.round(value)}{max === 100 ? '%' : ''}</text>
-        {sub && <text x={cx} y={cy + size * 0.13} textAnchor="middle" fontSize={11} fill="#64748b">{sub}</text>}
+        <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight={800} fill={INK}>{Math.round(value)}{max === 100 ? '%' : ''}</text>
+        {sub && <text x={cx} y={cy + size * 0.13} textAnchor="middle" fontSize={11} fill={MUTED}>{sub}</text>}
       </svg>
       <div className="ring-label">{label}</div>
     </div>
@@ -90,11 +116,45 @@ export function Radar({ axes, values, color = '#4f46e5', size = 220, max = 5 }: 
   const poly = (frac: (i: number) => number) => axes.map((_, i) => pt(i, frac(i)).join(',')).join(' ');
   return (
     <svg width={size} height={size} role="img" aria-label="INVEST radar">
-      {rings.map((f) => <polygon key={f} points={poly(() => f)} fill="none" stroke="#e2e8f0" strokeWidth={1} />)}
-      {axes.map((_, i) => { const [x, y] = pt(i, 1); return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#e2e8f0" strokeWidth={1} />; })}
+      {rings.map((f) => <polygon key={f} points={poly(() => f)} fill="none" stroke={GRID} strokeWidth={1} />)}
+      {axes.map((_, i) => { const [x, y] = pt(i, 1); return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke={GRID} strokeWidth={1} />; })}
       <polygon points={poly((i) => (values[i] ?? 0) / max)} fill={`${color}26`} stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      {axes.map((a, i) => { const [x, y] = pt(i, 1.2); return <text key={a} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={11} fontWeight={600} fill="#475569">{a}</text>; })}
+      {axes.map((a, i) => { const [x, y] = pt(i, 1.2); return <text key={a} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={11} fontWeight={600} fill={MUTED}>{a}</text>; })}
     </svg>
+  );
+}
+
+// ── Donut chart ───────────────────────────────────────────────────────────────
+export function Donut({ segments, size = 170, label }: { segments: { label: string; value: number; color: string }[]; size?: number; label?: string }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const cx = size / 2, cy = size / 2, r = size / 2 - 16;
+  let angle = -Math.PI / 2;
+  const arcs = segments.filter((s) => s.value > 0).map((s) => {
+    const span = (s.value / total) * Math.PI * 2;
+    const a0 = angle, a1 = angle + span;
+    angle = a1;
+    const large = span > Math.PI ? 1 : 0;
+    const [x0, y0] = [cx + r * Math.cos(a0), cy + r * Math.sin(a0)];
+    const [x1, y1] = [cx + r * Math.cos(a1 - 0.0001), cy + r * Math.sin(a1 - 0.0001)];
+    return { ...s, d: `M${x0},${y0} A${r},${r} 0 ${large} 1 ${x1},${y1}` };
+  });
+  return (
+    <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <svg width={size} height={size} role="img" aria-label={label ?? 'Distribution'}>
+        {arcs.map((a) => <path key={a.label} d={a.d} fill="none" stroke={a.color} strokeWidth={17} strokeLinecap="butt"><title>{a.label}: {a.value}</title></path>)}
+        <text x={cx} y={cy - 3} textAnchor="middle" fontSize={size * 0.17} fontWeight={800} fill={INK}>{total}</text>
+        {label && <text x={cx} y={cy + size * 0.11} textAnchor="middle" fontSize={10.5} fill={MUTED}>{label}</text>}
+      </svg>
+      <div>
+        {segments.map((s) => (
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, margin: '4px 0' }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, display: 'inline-block' }} />
+            <span style={{ color: 'var(--muted)' }}>{s.label}</span>
+            <strong style={{ marginLeft: 'auto', paddingLeft: 12 }}>{s.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -104,6 +164,25 @@ export function ProgressBar({ label, current, target, pct, color }: { label: str
     <div className="progress">
       <div className="top"><span style={{ fontWeight: 600 }}>{label}</span><span className="hint">{current} → {target}</span></div>
       <div className="bar"><div className="fill" style={{ width: `${Math.max(4, Math.min(100, pct))}%`, background: color }} /></div>
+    </div>
+  );
+}
+
+// ── Workflow pipeline flow ────────────────────────────────────────────────────
+export function Flow({ stages }: { stages: { label: string; count: number }[] }) {
+  const max = Math.max(1, ...stages.map((s) => s.count));
+  return (
+    // tabIndex makes the horizontally-scrollable strip keyboard-reachable (axe: scrollable-region-focusable)
+    <div className="flow" role="list" aria-label="Delivery pipeline stages" tabIndex={0}>
+      {stages.map((s, i) => (
+        <div className="stage" role="listitem" key={s.label}>
+          <div className={`node${s.count === max && s.count > 0 ? ' hot' : ''}`}>
+            <div className="n">{s.count}</div>
+            <div className="s">{s.label}</div>
+          </div>
+          {i < stages.length - 1 && <div className="link" aria-hidden />}
+        </div>
+      ))}
     </div>
   );
 }

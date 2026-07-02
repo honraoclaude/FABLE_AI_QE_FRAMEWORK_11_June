@@ -5,14 +5,18 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
 const TABS = [
+  'Dashboard',
   'Story Pipeline',
   'Product Owner',
   '3 Amigos',
   'Risk Register',
   'RBT Testing',
-  'Regression Pack',
+  'Regression Packs',
   'Go / No-Go',
   'Metrics',
+  'AI Insights',
+  'Reports',
+  'Settings',
 ];
 
 test.describe('WCAG 2.1 AA — automated axe-core scan', () => {
