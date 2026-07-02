@@ -106,6 +106,7 @@ export interface ActionItem {
   severity: 'blocker' | 'attention';
   source: string;
   done: boolean;
+  jiraKey?: string | null;
 }
 
 export interface ThreeAmigosEvaluation {
@@ -199,6 +200,21 @@ export const api = {
     request<{ story: Story; message: string }>(`/stories/${id}/three-amigos/complete`, {
       method: 'POST',
       body: '{}',
+    }),
+  pushAcToJira: (id: string) =>
+    request<{ pushed: number; jiraKey: string; url: string }>(`/stories/${id}/ac/push-to-jira`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  pushActionsToJira: (id: string) =>
+    request<{ created: { actionId: string; jiraKey: string }[]; url: string }>(
+      `/stories/${id}/actions/push-to-jira`,
+      { method: 'POST', body: '{}' },
+    ),
+  jiraTransition: (id: string, to: string) =>
+    request<{ jiraKey: string; transitioned: string }>(`/stories/${id}/jira/transition`, {
+      method: 'POST',
+      body: JSON.stringify({ to }),
     }),
   threeAmigosReopen: (id: string) =>
     request<{ story: Story; message: string }>(`/stories/${id}/three-amigos/reopen`, {

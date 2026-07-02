@@ -37,6 +37,7 @@ export function deriveActions(invest: InvestAssessment, previous: ActionItem[] =
       severity: c.status === 'fail' ? 'blocker' : 'attention',
       source: `INVEST ${c.letter} — ${c.name}`,
       done: previousById.get(id)?.done ?? false,
+      jiraKey: previousById.get(id)?.jiraKey ?? null,
     });
   }
   return actions;

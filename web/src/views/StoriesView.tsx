@@ -14,6 +14,7 @@ export default function StoriesView() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [invest, setInvest] = useState<Record<string, InvestAssessment>>({});
   const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [pushMsg, setPushMsg] = useState<Record<string, string>>({});
 
   const withPending = async (key: string, fn: () => Promise<void>) => {
     setPending((p) => ({ ...p, [key]: true }));
@@ -57,6 +58,16 @@ export default function StoriesView() {
         setInvest((prev) => ({ ...prev, [id]: a }));
       } catch (e) {
         setError(String(e));
+      }
+    });
+
+  const pushAc = (id: string) =>
+    withPending(`push-${id}`, async () => {
+      try {
+        const r = await api.pushAcToJira(id);
+        setPushMsg((prev) => ({ ...prev, [id]: `Pushed ${r.pushed} scenarios to ${r.jiraKey} as a comment — ${r.url}` }));
+      } catch (e) {
+        setPushMsg((prev) => ({ ...prev, [id]: String(e) }));
       }
     });
 
@@ -198,7 +209,18 @@ export default function StoriesView() {
         return (
           <div key={storyId} className="panel" style={{ marginTop: '1rem' }}>
             <h3>Acceptance Criteria — {story?.title}</h3>
-            <p className="hint">Source: {list[0]?.source === 'ai' ? 'Claude AI' : 'deterministic template (AI not configured)'}</p>
+            <p className="hint">
+              Source: {list[0]?.source === 'ai' ? 'Claude AI' : 'deterministic template (AI not configured)'}
+              {story?.jiraKey && (
+                <>
+                  {' · '}
+                  <button className="action" onClick={() => pushAc(storyId)} disabled={pending[`push-${storyId}`]}>
+                    {pending[`push-${storyId}`] ? 'Pushing…' : `Push AC to ${story.jiraKey}`}
+                  </button>
+                </>
+              )}
+            </p>
+            {pushMsg[storyId] && <p className="hint" role="status">{pushMsg[storyId]}</p>}
             <table>
               <thead>
                 <tr>

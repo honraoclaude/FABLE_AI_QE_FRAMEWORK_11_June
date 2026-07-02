@@ -26,6 +26,10 @@ import {
   type Refinement,
 } from './backlog-data.js';
 import { poJiraConfigFromEnv, syncPoBacklogFromJira } from './po-jira.js';
+import { buildTrends, takeSnapshot, type PoSnapshot } from './po-snapshots.js';
+import { copilotAvailable, executeCopilotTool, runCopilot, type CopilotContext, type CopilotTurn } from './ai/copilot.js';
+
+export { executeCopilotTool }; // re-export for tests
 
 interface SyncedBacklog {
   stories: RawStory[];
@@ -57,6 +61,36 @@ export function buildPoRouter(repo: Repo): Router {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? Math.min(40, Math.max(1, Math.round(n))) : fallback;
   }
+
+  function snapshotNow(trigger: 'boot' | 'sync' | 'reset' | 'manual') {
+    const a = active();
+    const stories = scoreStories(a.stories, a.votes);
+    return takeSnapshot(repo, stories, buildSummary(stories, OUTCOMES), a.source, trigger);
+  }
+
+  function refinementsForActive(): Record<string, Refinement> {
+    const a = active();
+    if (a.source === 'sample') return STORY_REFINEMENTS;
+    const out: Record<string, Refinement> = {};
+    for (const s of a.stories) out[s.id] = deriveRefinement(s);
+    return out;
+  }
+
+  function copilotContext(): CopilotContext {
+    const a = active();
+    return {
+      stories: scoreStories(a.stories, a.votes),
+      outcomes: OUTCOMES,
+      refinements: refinementsForActive(),
+      conflicts: a.source === 'sample' ? CONFLICT_RESOLUTIONS : [],
+      sprintHistory: SPRINT_HISTORY,
+      trends: buildTrends(repo.listPoSnapshots<PoSnapshot>()).points,
+      source: a.source,
+    };
+  }
+
+  // Boot snapshot so trend history accrues even without syncs (skipped when recent).
+  snapshotNow('boot');
 
   // ── Jira sync ──────────────────────────────────────────────────────────
   r.get('/jira/status', (_req, res) => {
@@ -92,6 +126,7 @@ export function buildPoRouter(repo: Repo): Router {
         count: mapped.stories.length,
       };
       repo.savePoState(PO_KEY, state);
+      snapshotNow('sync');
       res.json({ synced: state.count, jql: cfg.jql, source: 'jira' });
     } catch (err) {
       res.status(502).json({ error: `Jira sync failed: ${(err as Error).message}` });
@@ -100,7 +135,42 @@ export function buildPoRouter(repo: Repo): Router {
 
   r.post('/jira/reset', (_req, res) => {
     repo.clearPoState(PO_KEY);
+    snapshotNow('reset');
     res.json({ source: 'sample', count: SAMPLE_BACKLOG.length });
+  });
+
+  // ── Sprint snapshots & trends ──────────────────────────────────────────
+  r.get('/trends', (_req, res) => {
+    res.json(buildTrends(repo.listPoSnapshots<PoSnapshot>()));
+  });
+
+  r.post('/snapshot', (_req, res) => {
+    const snap = snapshotNow('manual');
+    res.status(201).json({ takenAt: snap?.takenAt ?? null });
+  });
+
+  // ── Sprint Copilot (agentic chat over the engines) ─────────────────────
+  r.post('/copilot', async (req, res) => {
+    if (!copilotAvailable()) {
+      res.status(503).json({
+        error:
+          'Sprint Copilot needs AI enabled — set ANTHROPIC_API_KEY in .env and remove QE_DISABLE_AI, then restart.',
+      });
+      return;
+    }
+    const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const turns: CopilotTurn[] = raw
+      .filter((m: { role?: string; content?: string }) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim() !== '')
+      .map((m: { role: 'user' | 'assistant'; content: string }) => ({ role: m.role, content: m.content }));
+    if (turns.length === 0 || turns[turns.length - 1]!.role !== 'user') {
+      res.status(400).json({ error: 'messages must end with a user turn' });
+      return;
+    }
+    try {
+      res.json(await runCopilot(turns.slice(-12), copilotContext()));
+    } catch (err) {
+      res.status(502).json({ error: `Copilot failed: ${(err as Error).message}` });
+    }
   });
 
   // ── Backlog + derived views ────────────────────────────────────────────
@@ -135,14 +205,7 @@ export function buildPoRouter(repo: Repo): Router {
 
   // Refinements: authored for the sample; heuristically derived for synced stories.
   r.get('/refinements', (_req, res) => {
-    const a = active();
-    if (a.source === 'sample') {
-      res.json(STORY_REFINEMENTS);
-      return;
-    }
-    const out: Record<string, Refinement> = {};
-    for (const s of a.stories) out[s.id] = deriveRefinement(s);
-    res.json(out);
+    res.json(refinementsForActive());
   });
 
   // Conflict resolutions are hand-authored for the sample only.

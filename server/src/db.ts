@@ -21,7 +21,9 @@ export function openDb(file?: string): Database.Database {
     CREATE TABLE IF NOT EXISTS tests     (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS rbt_frameworks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS po_state (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS po_snapshots (id TEXT PRIMARY KEY, taken_at TEXT NOT NULL, data TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_scenarios_story ON scenarios(story_id);
+    CREATE INDEX IF NOT EXISTS idx_snapshots_taken ON po_snapshots(taken_at);
   `);
   return db;
 }
@@ -111,6 +113,19 @@ export class Repo {
   }
   clearPoState(key: string): void {
     this.db.prepare('DELETE FROM po_state WHERE id = ?').run(key);
+  }
+
+  // --- Product Owner sprint snapshots (trend history) ---
+  savePoSnapshot(snap: { id: string; takenAt: string }): void {
+    this.db
+      .prepare('INSERT INTO po_snapshots (id, taken_at, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(snap.id, snap.takenAt, JSON.stringify(snap));
+  }
+  listPoSnapshots<T>(limit = 24): T[] {
+    const rows = this.db
+      .prepare('SELECT data FROM po_snapshots ORDER BY taken_at DESC LIMIT ?')
+      .all(limit) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as T).reverse(); // oldest → newest
   }
 
   // --- regression test cases ---

@@ -206,7 +206,9 @@ export function computeRoadmap(stories: ScoredStory[], capacity = 10): Roadmap {
       if (!s.dependencies.every((d) => processed.has(d) || !storyMap.has(d))) continue;
       const depSprints = s.dependencies.filter((d) => assigned.has(d)).map((d) => assigned.get(d)! + 1);
       let sp = depSprints.length ? Math.max(...depSprints) : 1;
-      while ((sprintEffort.get(sp) ?? 0) + s.effort > capacity) sp++;
+      // Advance past full sprints. A story larger than the capacity itself
+      // occupies the next EMPTY sprint alone (otherwise this would loop forever).
+      while ((sprintEffort.get(sp) ?? 0) > 0 && (sprintEffort.get(sp) ?? 0) + s.effort > capacity) sp++;
       sprintEffort.set(sp, (sprintEffort.get(sp) ?? 0) + s.effort);
       assigned.set(s.id, sp);
       processed.add(s.id);

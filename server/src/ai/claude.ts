@@ -28,6 +28,14 @@ function getClient(): Anthropic {
   return client;
 }
 
+/** Shared client + model for other AI modules (e.g. the Sprint Copilot). */
+export function anthropicClient(): Anthropic {
+  return getClient();
+}
+export function aiModel(): string {
+  return MODEL;
+}
+
 /**
  * Optional MCP enrichment (Phase 3, §18): when ATLASSIAN_MCP_URL is set and a
  * story carries a jiraKey, AC generation runs through the Claude API MCP

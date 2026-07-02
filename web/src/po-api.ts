@@ -70,6 +70,33 @@ export interface Backlog {
   syncedAt: string | null;
 }
 
+export interface TrendPoint {
+  takenAt: string;
+  trigger: string;
+  source: 'sample' | 'jira';
+  total: number;
+  ready: number;
+  refine: number;
+  blocked: number;
+  avgHealth: number;
+  dorReady: number;
+  regulatedCount: number;
+  avgConflict: number;
+  totalRice: number;
+  readinessPct: number;
+}
+
+export interface Trends {
+  points: TrendPoint[];
+  deltas: Record<string, number> | null;
+}
+
+export interface CopilotMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  toolTrace?: { tool: string; input: Record<string, unknown> }[];
+}
+
 export interface JiraPoStatus {
   configured: boolean;
   jql: string | null;
@@ -179,6 +206,9 @@ export const po = {
   jiraStatus: () => get<JiraPoStatus>('/jira/status'),
   jiraSync: () => post<{ synced: number; jql: string; source: string }>('/jira/sync', {}),
   jiraReset: () => post<{ source: string; count: number }>('/jira/reset', {}),
+  trends: () => get<Trends>('/trends'),
+  copilot: (messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    post<{ reply: string; toolTrace: { tool: string; input: Record<string, unknown> }[] }>('/copilot', { messages }),
   roadmap: (capacity: number) => get<Roadmap>(`/roadmap?capacity=${capacity}`),
   sprint: (selectedIds: string[], capacity: number) => post<SprintPlan>('/sprint', { selectedIds, capacity }),
   scenarios: (capacity: number) => get<Scenario[]>(`/scenarios?capacity=${capacity}`),

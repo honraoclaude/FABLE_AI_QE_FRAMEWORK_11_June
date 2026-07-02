@@ -51,6 +51,8 @@ export interface ActionItem {
   severity: 'blocker' | 'attention'; // from INVEST fail / warn
   source: string; // e.g. "INVEST V — Valuable"
   done: boolean;
+  /** Jira sub-task key once pushed to Jira (prevents duplicate creation) */
+  jiraKey?: string | null;
 }
 
 export type TestType =

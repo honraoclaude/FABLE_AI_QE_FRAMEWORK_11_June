@@ -10,6 +10,7 @@ import {
   type Scenario,
   type ScoredStory,
   type SprintPlan,
+  type Trends,
 } from '../po-api';
 import { Gauge, KpiCard, ProgressBar, Radar, trendSeries } from '../components/dashboard';
 import { IconChart, IconFlag, IconFlask, IconLayers, IconShield, IconSpark, IconUsers } from '../icons';
@@ -21,6 +22,7 @@ const statusBadge = (s: string) => (s === 'Sprint Ready' ? 'ok' : s === 'Needs R
 
 const SUBTABS = [
   ['overview', 'Overview'],
+  ['copilot', 'Sprint Copilot'],
   ['stories', 'Stories (TPO)'],
   ['heatmap', 'Risk Heatmap'],
   ['sprint', 'Sprint Builder'],
@@ -65,6 +67,7 @@ export default function ProductOwnerView() {
   const [jira, setJira] = useState<JiraPoStatus | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [trends, setTrends] = useState<Trends | null>(null);
 
   const [capacity, setCapacity] = useState(10);
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
@@ -77,6 +80,7 @@ export default function ProductOwnerView() {
     po.refinements().then(setRefinements).catch(() => undefined);
     po.conflicts().then(setConflicts).catch(() => undefined);
     po.jiraStatus().then(setJira).catch(() => undefined);
+    po.trends().then(setTrends).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -165,7 +169,8 @@ export default function ProductOwnerView() {
         <p className="hint">Loading backlog…</p>
       ) : (
         <>
-          {tab === 'overview' && <Overview backlog={backlog} roadmap={roadmap} />}
+          {tab === 'overview' && <Overview backlog={backlog} roadmap={roadmap} trends={trends} />}
+          {tab === 'copilot' && <Copilot />}
           {tab === 'stories' && <Stories stories={stories} />}
           {tab === 'heatmap' && <Heatmap stories={stories} />}
           {tab === 'sprint' && (
@@ -189,8 +194,29 @@ export default function ProductOwnerView() {
 }
 
 // ── Overview (executive dashboard) ──────────────────────────────────────────
-function Overview({ backlog, roadmap }: { backlog: Backlog; roadmap: Roadmap | null }) {
+function Overview({ backlog, roadmap, trends }: { backlog: Backlog; roadmap: Roadmap | null; trends: Trends | null }) {
   const s = backlog.summary;
+  const hasHistory = (trends?.points.length ?? 0) >= 2;
+
+  /** Real snapshot series + delta when history exists; indicative otherwise. */
+  const kpiTrend = (
+    key: keyof Trends['points'][number],
+    fallback: number,
+    unit = '',
+  ): { series: number[]; trend: { dir: 'up' | 'down' | 'flat'; text: string } } => {
+    if (hasHistory && trends) {
+      const series = trends.points.map((p) => Number(p[key]));
+      const delta = trends.deltas?.[key as string] ?? 0;
+      return {
+        series,
+        trend: {
+          dir: delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat',
+          text: delta === 0 ? 'no change' : `${delta > 0 ? '+' : ''}${delta}${unit} vs last snapshot`,
+        },
+      };
+    }
+    return { series: trendSeries(fallback), trend: { dir: 'flat', text: 'no history yet' } };
+  };
   const stories = backlog.stories;
   const dims = ['I', 'N', 'V', 'E', 'S', 'T'] as const;
   const radarVals = dims.map((d) => stories.reduce((sum, st) => sum + st.invest[d], 0) / stories.length);
@@ -231,16 +257,20 @@ function Overview({ backlog, roadmap }: { backlog: Backlog; roadmap: Roadmap | n
 
       {/* KPI cards */}
       <div className="kpis">
-        <KpiCard icon={IconLayers} tint="#4f46e5" label="Total Stories" value={s.total} series={trendSeries(s.total)} trend={{ dir: 'flat', text: 'stable' }} context="in active backlog" />
-        <KpiCard icon={IconFlag} tint="#10b981" label="Sprint Ready" value={s.ready} series={trendSeries(s.ready)} trend={{ dir: 'up', text: '+2 vs last sprint' }} context={`${readinessPct}% of backlog`} />
-        <KpiCard icon={IconFlask} tint="#f59e0b" label="Needs Refinement" value={s.refine} series={trendSeries(s.refine)} trend={{ dir: 'flat', text: 'watch' }} context="in refinement queue" />
-        <KpiCard icon={IconChart} tint="#4f46e5" label="INVEST Health" value={`${s.avgHealth}%`} series={trendSeries(s.avgHealth)} trend={{ dir: 'up', text: '+6%' }} context="avg story quality" />
-        <KpiCard icon={IconShield} tint="#10b981" label="DoR Readiness" value={`${Math.round((s.dorReady / s.total) * 100)}%`} series={trendSeries(s.dorReady)} trend={{ dir: 'up', text: '+1 story' }} context={`${s.dorReady}/${s.total} pass the gate`} />
-        <KpiCard icon={IconShield} tint="#ef4444" label="FCA-Regulated" value={s.regulatedCount} series={trendSeries(s.regulatedCount)} trend={{ dir: 'flat', text: 'tracked' }} context="require compliance sign-off" />
-        <KpiCard icon={IconUsers} tint="#f59e0b" label="Conflict Index" value={`${s.avgConflict}%`} series={trendSeries(s.avgConflict)} trend={{ dir: 'flat', text: 'balanced' }} context="avg stakeholder disagreement" />
-        <KpiCard icon={IconSpark} tint="#4f46e5" label="Total RICE Value" value={totalRice.toLocaleString()} series={trendSeries(totalRice / 1000)} trend={{ dir: 'up', text: '+8%' }} context="weighted backlog value" />
+        <KpiCard icon={IconLayers} tint="#4f46e5" label="Total Stories" value={s.total} {...kpiTrend('total', s.total)} context="in active backlog" />
+        <KpiCard icon={IconFlag} tint="#10b981" label="Sprint Ready" value={s.ready} {...kpiTrend('ready', s.ready)} context={`${readinessPct}% of backlog`} />
+        <KpiCard icon={IconFlask} tint="#f59e0b" label="Needs Refinement" value={s.refine} {...kpiTrend('refine', s.refine)} context="in refinement queue" />
+        <KpiCard icon={IconChart} tint="#4f46e5" label="INVEST Health" value={`${s.avgHealth}%`} {...kpiTrend('avgHealth', s.avgHealth, '%')} context="avg story quality" />
+        <KpiCard icon={IconShield} tint="#10b981" label="DoR Readiness" value={`${Math.round((s.dorReady / s.total) * 100)}%`} {...kpiTrend('dorReady', s.dorReady)} context={`${s.dorReady}/${s.total} pass the gate`} />
+        <KpiCard icon={IconShield} tint="#ef4444" label="FCA-Regulated" value={s.regulatedCount} {...kpiTrend('regulatedCount', s.regulatedCount)} context="require compliance sign-off" />
+        <KpiCard icon={IconUsers} tint="#f59e0b" label="Conflict Index" value={`${s.avgConflict}%`} {...kpiTrend('avgConflict', s.avgConflict, '%')} context="avg stakeholder disagreement" />
+        <KpiCard icon={IconSpark} tint="#4f46e5" label="Total RICE Value" value={totalRice.toLocaleString()} {...kpiTrend('totalRice', totalRice / 1000)} context="weighted backlog value" />
       </div>
-      <p className="hint" style={{ marginTop: 6 }}>Trends are indicative, derived from current backlog composition.</p>
+      <p className="hint" style={{ marginTop: 6 }}>
+        {hasHistory && trends
+          ? `Trends computed from ${trends.points.length} sprint snapshots (since ${new Date(trends.points[0]!.takenAt).toLocaleDateString()}). Snapshots record on every Jira sync.`
+          : 'Trends are indicative until at least 2 sprint snapshots exist — snapshots record on server start and every Jira sync.'}
+      </p>
 
       {/* Gauges */}
       <div className="grid3" style={{ marginTop: 16 }}>
@@ -710,6 +740,107 @@ function Refine({ stories, refinements }: { stories: ScoredStory[]; refinements:
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Sprint Copilot (agentic chat over the engines) ──────────────────────────
+const COPILOT_SUGGESTIONS = [
+  'What should we pull into the next sprint if capacity drops to 8 weeks?',
+  'Why is the top-ranked story ranked #1?',
+  'Compare the three sprint scenarios and recommend one',
+  'Which stories put FCA compliance at risk right now?',
+  'Is the backlog getting healthier over time?',
+];
+
+function Copilot() {
+  const [messages, setMessages] = useState<import('../po-api').CopilotMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async (text: string) => {
+    const q = text.trim();
+    if (!q || busy) return;
+    setError(null);
+    setInput('');
+    const history = [...messages, { role: 'user' as const, content: q }];
+    setMessages(history);
+    setBusy(true);
+    try {
+      const r = await po.copilot(history.map(({ role, content }) => ({ role, content })));
+      setMessages([...history, { role: 'assistant', content: r.reply, toolTrace: r.toolTrace }]);
+    } catch (e) {
+      setError(String(e));
+      setMessages(history);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel" style={{ maxWidth: 860 }}>
+      <h3 style={{ marginTop: 0 }}>Sprint Copilot</h3>
+      <p className="hint">
+        Ask about the backlog in plain English. Every answer is computed by calling the same scoring, sprint,
+        roadmap and scenario engines the dashboard uses — the tool calls are shown under each reply, so every
+        number is traceable.
+      </p>
+
+      {messages.length === 0 && (
+        <div className="chips" style={{ marginBottom: 12 }}>
+          {COPILOT_SUGGESTIONS.map((sg) => (
+            <button key={sg} className="ghost action" style={{ fontWeight: 500 }} onClick={() => send(sg)} disabled={busy}>
+              {sg}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div aria-live="polite">
+        {messages.map((m, i) => (
+          <div key={i} style={{ margin: '10px 0' }}>
+            {m.role === 'user' ? (
+              <div style={{ background: 'var(--info-bg)', color: 'var(--info-fg)', borderRadius: 12, padding: '10px 14px', marginLeft: 'auto', maxWidth: '85%', width: 'fit-content', fontWeight: 500 }}>
+                {m.content}
+              </div>
+            ) : (
+              <div style={{ background: 'var(--slate-50)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 14px', maxWidth: '95%', whiteSpace: 'pre-wrap' }}>
+                {m.content}
+                {m.toolTrace && m.toolTrace.length > 0 && (
+                  <div className="chips" style={{ marginTop: 10 }}>
+                    {m.toolTrace.map((t, j) => (
+                      <span key={j} className="badge muted" title={JSON.stringify(t.input)}>
+                        ⚙ {t.tool}{Object.keys(t.input).length > 0 ? `(${Object.entries(t.input).map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.length}]` : String(v)}`).join(', ')})` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+        {busy && <div className="skeleton" style={{ height: 44, maxWidth: '60%' }} aria-label="Copilot is thinking" />}
+      </div>
+
+      {error && <p role="alert" className="badge bad" style={{ display: 'inline-block' }}>{error}</p>}
+
+      <form
+        onSubmit={(e) => { e.preventDefault(); void send(input); }}
+        style={{ display: 'flex', gap: 8, marginTop: 12 }}
+      >
+        <input
+          style={{ flex: 1 }}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="e.g. Can we fit FSC-003 and FSC-007 into one sprint?"
+          aria-label="Ask Sprint Copilot"
+          disabled={busy}
+        />
+        <button className="action" type="submit" disabled={busy || !input.trim()}>
+          {busy ? 'Thinking…' : 'Ask'}
+        </button>
+      </form>
     </div>
   );
 }

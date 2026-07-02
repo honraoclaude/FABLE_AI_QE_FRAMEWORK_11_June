@@ -45,6 +45,34 @@ export default function ThreeAmigosView() {
     }
   };
 
+  const pushActions = async (id: string) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const r = await api.pushActionsToJira(id);
+      setMessages((prev) => ({
+        ...prev,
+        [id]: `Created ${r.created.length} Jira sub-task(s): ${r.created.map((c) => c.jiraKey).join(', ')} — ${r.url}`,
+      }));
+      await evaluate(id); // refresh action list with jira keys
+    } catch (e) {
+      setMessages((prev) => ({ ...prev, [id]: String(e) }));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
+  const transition = async (id: string, to: string) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const r = await api.jiraTransition(id, to);
+      setMessages((prev) => ({ ...prev, [id]: `${r.jiraKey} moved to "${r.transitioned}" in Jira` }));
+    } catch (e) {
+      setMessages((prev) => ({ ...prev, [id]: String(e) }));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
   const reopen = async (id: string) => {
     try {
       const r = await api.threeAmigosReopen(id);
@@ -116,7 +144,7 @@ export default function ThreeAmigosView() {
                             />
                           </td>
                           <td><span className="badge muted">{a.owner}</span></td>
-                          <td>{a.description}</td>
+                          <td>{a.description}{a.jiraKey && <> <span className="badge ok">{a.jiraKey}</span></>}</td>
                           <td className="hint">{a.source}</td>
                           <td>
                             <span className={`badge ${a.severity === 'blocker' ? 'bad' : 'warn'}`}>{a.severity}</span>
@@ -142,6 +170,20 @@ export default function ThreeAmigosView() {
                   <button className="action" onClick={() => evaluate(s.id)} disabled={busy[s.id]}>
                     {busy[s.id] ? 'Re-evaluating…' : 'Re-evaluate'}
                   </button>
+                  {s.jiraKey && ev.actions.some((a) => !a.done) && (
+                    <>{' '}
+                      <button className="action ghost" onClick={() => pushActions(s.id)} disabled={busy[s.id]}>
+                        Create Jira sub-tasks for open actions
+                      </button>
+                    </>
+                  )}
+                  {s.jiraKey && s.status === 'three_amigos_complete' && (
+                    <>{' '}
+                      <button className="action ghost" onClick={() => transition(s.id, 'In Progress')} disabled={busy[s.id]}>
+                        Move {s.jiraKey} to In Progress
+                      </button>
+                    </>
+                  )}
                 </p>
               </>
             )}

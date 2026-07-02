@@ -30,6 +30,7 @@ import {
   identifyRbtRisksWithAi,
 } from './ai/claude.js';
 import { fetchJiraIssues, jiraConfigFromEnv, mapIssueToStory } from './integrations/jira.js';
+import { addJiraComment, createJiraSubtask, formatAcComment, transitionJiraIssue } from './integrations/jira-write.js';
 
 export function buildRouter(repo: Repo): Router {
   const r = Router();
@@ -287,6 +288,116 @@ export function buildRouter(repo: Repo): Router {
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
     res.json({ story, scenarios });
+  });
+
+  // ---------------- Jira write-back ----------------
+  r.post('/stories/:id/ac/push-to-jira', async (req, res) => {
+    const story = repo.getStory(req.params.id);
+    if (!story) {
+      res.status(404).json({ error: 'story not found' });
+      return;
+    }
+    if (!story.jiraKey) {
+      res.status(409).json({ error: 'Story has no Jira key — only synced stories can be pushed back' });
+      return;
+    }
+    const cfg = jiraConfigFromEnv();
+    if (!cfg) {
+      res.status(503).json({ error: 'Jira not configured' });
+      return;
+    }
+    const scenarios = repo.scenariosFor(story.id);
+    if (scenarios.length === 0) {
+      res.status(409).json({ error: 'No AC scenarios yet — generate AC first' });
+      return;
+    }
+    try {
+      const comment = await addJiraComment(
+        cfg,
+        story.jiraKey,
+        formatAcComment(scenarios, scenarios[0]?.source ?? 'template'),
+      );
+      res.json({
+        pushed: scenarios.length,
+        jiraKey: story.jiraKey,
+        commentId: comment.id,
+        url: `${cfg.baseUrl}/browse/${story.jiraKey}`,
+      });
+    } catch (err) {
+      res.status(502).json({ error: (err as Error).message });
+    }
+  });
+
+  r.post('/stories/:id/actions/push-to-jira', async (req, res) => {
+    const story = repo.getStory(req.params.id);
+    if (!story) {
+      res.status(404).json({ error: 'story not found' });
+      return;
+    }
+    if (!story.jiraKey) {
+      res.status(409).json({ error: 'Story has no Jira key — only synced stories can be pushed back' });
+      return;
+    }
+    const cfg = jiraConfigFromEnv();
+    if (!cfg) {
+      res.status(503).json({ error: 'Jira not configured' });
+      return;
+    }
+    const pending = (story.actions ?? []).filter((a) => !a.done && !a.jiraKey);
+    if (pending.length === 0) {
+      res.status(409).json({ error: 'No open, un-pushed actions — run the evaluator or check existing sub-tasks' });
+      return;
+    }
+    const created: { actionId: string; jiraKey: string }[] = [];
+    try {
+      for (const action of pending) {
+        const sub = await createJiraSubtask(
+          cfg,
+          story.jiraKey,
+          `[${action.owner}] ${action.description}`,
+          `Raised by the QE Intelligence Portal 3 Amigos evaluator.\nSource: ${action.source}\nSeverity: ${action.severity}\nOwner: ${action.owner}`,
+        );
+        action.jiraKey = sub.key;
+        created.push({ actionId: action.id, jiraKey: sub.key });
+      }
+    } catch (err) {
+      // persist any keys created before the failure so we never duplicate
+      story.updatedAt = new Date().toISOString();
+      repo.saveStory(story);
+      res.status(502).json({ error: (err as Error).message, created });
+      return;
+    }
+    story.updatedAt = new Date().toISOString();
+    repo.saveStory(story);
+    res.json({ created, url: `${cfg.baseUrl}/browse/${story.jiraKey}` });
+  });
+
+  r.post('/stories/:id/jira/transition', async (req, res) => {
+    const story = repo.getStory(req.params.id);
+    if (!story) {
+      res.status(404).json({ error: 'story not found' });
+      return;
+    }
+    if (!story.jiraKey) {
+      res.status(409).json({ error: 'Story has no Jira key' });
+      return;
+    }
+    const cfg = jiraConfigFromEnv();
+    if (!cfg) {
+      res.status(503).json({ error: 'Jira not configured' });
+      return;
+    }
+    const to = String(req.body?.to ?? '').trim();
+    if (!to) {
+      res.status(400).json({ error: 'body.to (target status name) is required' });
+      return;
+    }
+    try {
+      const result = await transitionJiraIssue(cfg, story.jiraKey, to);
+      res.json({ jiraKey: story.jiraKey, ...result });
+    } catch (err) {
+      res.status(502).json({ error: (err as Error).message });
+    }
   });
 
   // ---------------- DoD dual verification (§4) ----------------
