@@ -11,6 +11,7 @@ import MetricsView from './views/MetricsView';
 import AiInsightsView from './views/AiInsightsView';
 import ReportsView from './views/ReportsView';
 import SettingsView from './views/SettingsView';
+import AuditView from './views/AuditView';
 import {
   IconAi, IconBell, IconChart, IconChevronLeft, IconCommand, IconDashboard, IconFlag, IconFlask, IconHome,
   IconLayers, IconMoon, IconPipeline, IconReport, IconSearch, IconSettings, IconShield, IconSpark, IconSun, IconUsers,
@@ -32,7 +33,8 @@ const NAV: NavItem[] = [
   { id: 'metrics', label: 'Metrics', icon: IconChart },
   { id: 'insights', label: 'AI Insights', icon: IconAi, section: 'Intelligence' },
   { id: 'reports', label: 'Reports', icon: IconReport },
-  { id: 'settings', label: 'Settings', icon: IconSettings, section: 'System' },
+  { id: 'audit', label: 'Audit Trail', icon: IconShield, section: 'System' },
+  { id: 'settings', label: 'Settings', icon: IconSettings },
 ];
 
 type TabId = (typeof NAV)[number]['id'];
@@ -142,6 +144,7 @@ export default function App() {
           {tab === 'metrics' && <MetricsView />}
           {tab === 'insights' && <AiInsightsView onNavigate={(id) => setTab(id)} />}
           {tab === 'reports' && <ReportsView />}
+          {tab === 'audit' && <AuditView />}
           {tab === 'settings' && <SettingsView />}
         </main>
       </div>

@@ -1,0 +1,22 @@
+# Render.com blueprint — deploy with "New +" → "Blueprint" pointing at this repo.
+# Attach the disk so SQLite data (stories, snapshots, audit trail) persists.
+services:
+  - type: web
+    name: qe-intelligence-portal
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: qe-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: '4000'
+      - key: QE_DB_PATH
+        value: /data/qe-portal.db
+      - key: QE_SEED
+        value: '1'
+      # Set these in the Render dashboard (never commit secrets):
+      # ANTHROPIC_API_KEY, JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_JQL,
+      # ZEPHYR_API_TOKEN, ZEPHYR_PROJECT_KEY

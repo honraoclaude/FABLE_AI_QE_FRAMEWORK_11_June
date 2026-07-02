@@ -88,4 +88,22 @@ test.describe('P1 smoke: portal core journeys', () => {
     await page.getByRole('button', { name: 'Compute scorecard' }).click();
     await expect(page.locator('.scorebox')).toContainText('/100');
   });
+
+  test('go/no-go auto-populates signals with evidence from live data', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('tab', { name: 'Go / No-Go' }).click();
+    await page.getByRole('button', { name: /Auto-populate/ }).click();
+    await expect(page.getByText(/↳/).first()).toBeVisible(); // evidence lines rendered
+  });
+
+  test('audit trail records gate decisions with an intact chain', async ({ page }) => {
+    await page.goto('/');
+    // create a decision, then verify it lands in the audit log
+    await page.getByRole('tab', { name: 'Go / No-Go' }).click();
+    await page.getByRole('button', { name: 'Compute scorecard' }).click();
+    await expect(page.locator('.scorebox')).toContainText('/100');
+    await page.getByRole('tab', { name: 'Audit Trail' }).click();
+    await expect(page.getByText(/chain intact/)).toBeVisible();
+    await expect(page.getByText('gonogo.computed').first()).toBeVisible();
+  });
 });

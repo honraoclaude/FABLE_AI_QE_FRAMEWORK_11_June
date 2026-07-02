@@ -107,6 +107,23 @@ All under `/api`:
 typecheck → unit tests → **Semgrep SAST** (per PR, §10.1) → web build → **Playwright P1 smoke +
 axe accessibility** → **Lighthouse CI** performance budget.
 
+## Deploy (shareable URL)
+
+The repo ships a single-container deployment:
+
+- **Render**: push the repo, then "New + → Blueprint" — [render.yaml](render.yaml) provisions the
+  service with a persistent disk for SQLite (`/data/qe-portal.db`) and a `/api/health` check.
+- **Railway/Fly**: `railway up` / `fly launch` with the [Dockerfile](Dockerfile); attach a volume and
+  set `QE_DB_PATH` to a path on it.
+- Set secrets in the platform dashboard: `ANTHROPIC_API_KEY`, `JIRA_*`, `ZEPHYR_*` (never commit them).
+- Once deployed, set the `STAGING_URL` repository variable on GitHub so the
+  [ZAP DAST workflow](.github/workflows/dast.yml) scans each release.
+
+**PostgreSQL**: the data layer is one `Repo` class ([server/src/db.ts](server/src/db.ts)) by design,
+so the swap is contained — but it stays SQLite until there is a real Postgres instance to verify
+against (an untested data layer is worse than a tested one). With the persistent-disk setup above,
+SQLite is fine well beyond demo scale.
+
 ## Production notes / integration path
 
 - **Storage**: SQLite via a JSON-document `Repo` class (`server/src/db.ts`). The spec targets

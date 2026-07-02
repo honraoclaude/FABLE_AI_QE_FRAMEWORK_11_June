@@ -406,6 +406,17 @@ ul.reasons li { margin: 2px 0; }
 .empty { text-align: center; padding: 36px 20px; color: var(--muted); }
 .empty .glyph { width: 52px; height: 52px; margin: 0 auto 10px; border-radius: 16px; background: var(--info-bg); color: var(--info-fg); display: flex; align-items: center; justify-content: center; }
 
+/* ── Print / PDF (leadership packs) ── */
+@media print {
+  .sidebar, .topbar, .cmdk-overlay, button.action, button.ghost, .quick-actions, .collapse-btn { display: none !important; }
+  body { background: #fff !important; background-image: none !important; color: #0f172a; }
+  .main { margin: 0; }
+  .content { max-width: none; padding: 0; animation: none; }
+  .panel, .kpi, .story-card, .insight { box-shadow: none !important; break-inside: avoid; }
+  .hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  th { position: static; }
+}
+
 @media (max-width: 900px) {
   .sidebar { position: fixed; }
   .main { margin-left: 68px; }

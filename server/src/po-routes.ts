@@ -26,8 +26,14 @@ import {
   type Refinement,
 } from './backlog-data.js';
 import { poJiraConfigFromEnv, syncPoBacklogFromJira } from './po-jira.js';
-import { buildTrends, takeSnapshot, type PoSnapshot } from './po-snapshots.js';
+import { analyzePredictions, buildTrends, takeSnapshot, type PoSnapshot } from './po-snapshots.js';
 import { copilotAvailable, executeCopilotTool, runCopilot, type CopilotContext, type CopilotTurn } from './ai/copilot.js';
+import {
+  decomposeStoryWithAi,
+  detectHiddenComplexityWithAi,
+  generateConflictResolutionWithAi,
+  type ComplexityFinding,
+} from './ai/po-ai.js';
 
 export { executeCopilotTool }; // re-export for tests
 
@@ -127,6 +133,7 @@ export function buildPoRouter(repo: Repo): Router {
       };
       repo.savePoState(PO_KEY, state);
       snapshotNow('sync');
+      repo.appendAudit('po.jira_synced', 'backlog:po', { synced: state.count, jql: cfg.jql });
       res.json({ synced: state.count, jql: cfg.jql, source: 'jira' });
     } catch (err) {
       res.status(502).json({ error: `Jira sync failed: ${(err as Error).message}` });
@@ -142,6 +149,78 @@ export function buildPoRouter(repo: Repo): Router {
   // ── Sprint snapshots & trends ──────────────────────────────────────────
   r.get('/trends', (_req, res) => {
     res.json(buildTrends(repo.listPoSnapshots<PoSnapshot>()));
+  });
+
+  // Prediction accuracy (framework §15): predicted readiness vs observed drift
+  // and actual delivery (matched to the QE pipeline by story id / Jira key).
+  r.get('/prediction-accuracy', (_req, res) => {
+    const delivered = new Set(
+      repo
+        .listStories()
+        .filter((s) => ['ready_for_release', 'released'].includes(s.status))
+        .flatMap((s) => [s.id, s.jiraKey ?? ''])
+        .filter(Boolean),
+    );
+    res.json(analyzePredictions(repo.listPoSnapshots<PoSnapshot>(48), delivered));
+  });
+
+  // ── AI for the PO module (gated; results persisted per story) ──────────
+  const aiUnavailable = (res: import('express').Response) =>
+    res.status(503).json({
+      error: 'AI is disabled — set ANTHROPIC_API_KEY in .env and remove QE_DISABLE_AI, then restart.',
+    });
+
+  function storyOr404(id: string, res: import('express').Response) {
+    const s = scored().find((x) => x.id.toLowerCase() === id.toLowerCase());
+    if (!s) res.status(404).json({ error: `story ${id} not found in the active backlog` });
+    return s;
+  }
+
+  r.post('/stories/:id/ai/conflict', async (req, res) => {
+    const s = storyOr404(req.params.id, res);
+    if (!s) return;
+    const result = await generateConflictResolutionWithAi(s);
+    if (!result) { aiUnavailable(res); return; }
+    const store = repo.getPoState<Record<string, unknown>>('ai_conflicts') ?? {};
+    store[s.id] = result;
+    repo.savePoState('ai_conflicts', store);
+    repo.appendAudit('po.ai_conflict_generated', `story:${s.id}`, { recommended: result.recommendedOption });
+    res.json(result);
+  });
+
+  r.post('/stories/:id/ai/decompose', async (req, res) => {
+    const s = storyOr404(req.params.id, res);
+    if (!s) return;
+    const result = await decomposeStoryWithAi(s);
+    if (!result) { aiUnavailable(res); return; }
+    const store = repo.getPoState<Record<string, unknown>>('ai_refinements') ?? {};
+    store[s.id] = result;
+    repo.savePoState('ai_refinements', store);
+    repo.appendAudit('po.ai_decomposed', `story:${s.id}`, {
+      shouldDecompose: result.shouldDecompose,
+      subStories: result.subStories.length,
+    });
+    res.json(result);
+  });
+
+  r.post('/stories/:id/ai/complexity', async (req, res) => {
+    const s = storyOr404(req.params.id, res);
+    if (!s) return;
+    const result = await detectHiddenComplexityWithAi(s);
+    if (!result) { aiUnavailable(res); return; }
+    const store = repo.getPoState<Record<string, ComplexityFinding>>('ai_complexity') ?? {};
+    store[s.id] = result;
+    repo.savePoState('ai_complexity', store);
+    repo.appendAudit('po.ai_complexity_scored', `story:${s.id}`, { score: result.complexityScore });
+    res.json(result);
+  });
+
+  r.get('/ai/results', (_req, res) => {
+    res.json({
+      conflicts: repo.getPoState<Record<string, unknown>>('ai_conflicts') ?? {},
+      refinements: repo.getPoState<Record<string, unknown>>('ai_refinements') ?? {},
+      complexity: repo.getPoState<Record<string, ComplexityFinding>>('ai_complexity') ?? {},
+    });
   });
 
   r.post('/snapshot', (_req, res) => {
@@ -203,14 +282,23 @@ export function buildPoRouter(repo: Repo): Router {
     res.json(computeFairness(SPRINT_HISTORY));
   });
 
-  // Refinements: authored for the sample; heuristically derived for synced stories.
+  // Refinements: authored for the sample; heuristic + AI-generated for synced.
   r.get('/refinements', (_req, res) => {
-    res.json(refinementsForActive());
+    const base = refinementsForActive();
+    if (active().source === 'jira') {
+      const ai = repo.getPoState<Record<string, Refinement>>('ai_refinements') ?? {};
+      for (const [id, refinement] of Object.entries(ai)) base[id] = refinement;
+    }
+    res.json(base);
   });
 
-  // Conflict resolutions are hand-authored for the sample only.
+  // Conflicts: hand-authored for the sample; AI-generated for synced stories.
   r.get('/conflicts', (_req, res) => {
-    res.json(active().source === 'sample' ? CONFLICT_RESOLUTIONS : []);
+    if (active().source === 'sample') {
+      res.json(CONFLICT_RESOLUTIONS);
+      return;
+    }
+    res.json(Object.values(repo.getPoState<Record<string, unknown>>('ai_conflicts') ?? {}));
   });
 
   return r;

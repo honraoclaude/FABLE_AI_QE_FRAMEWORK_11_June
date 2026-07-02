@@ -31,6 +31,8 @@ import {
 } from './ai/claude.js';
 import { fetchJiraIssues, jiraConfigFromEnv, mapIssueToStory } from './integrations/jira.js';
 import { addJiraComment, createJiraSubtask, formatAcComment, transitionJiraIssue } from './integrations/jira-write.js';
+import { computeLiveGonogo } from './engines/gonogo-live.js';
+import { syncFromZephyr, zephyrConfigFromEnv } from './integrations/zephyr.js';
 
 export function buildRouter(repo: Repo): Router {
   const r = Router();
@@ -71,6 +73,7 @@ export function buildRouter(repo: Repo): Router {
         repo.saveStory(mapIssueToStory(issue, existing));
         existing ? updated++ : created++;
       }
+      repo.appendAudit('jira.synced', 'pipeline:stories', { fetched: issues.length, created, updated, jql: cfg.jql });
       res.json({ fetched: issues.length, created, updated, jql: cfg.jql });
     } catch (err) {
       res.status(502).json({ error: `Jira sync failed: ${(err as Error).message}` });
@@ -140,6 +143,11 @@ export function buildRouter(repo: Repo): Router {
     }
     story.dorChecks = { ...story.dorChecks, ...(req.body?.checks ?? {}) };
     const result = scoreDor(story.type, story.dorChecks);
+    repo.appendAudit('dor.scored', `story:${story.jiraKey ?? story.id}`, {
+      score: result.score,
+      status: result.status,
+      gaps: result.gaps.map((g) => g.id),
+    });
     story.status =
       result.status === 'ready'
         ? 'ready_for_3_amigos'
@@ -215,6 +223,9 @@ export function buildRouter(repo: Repo): Router {
     story.status = 'three_amigos_complete';
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
+    repo.appendAudit('three_amigos.completed', `story:${story.jiraKey ?? story.id}`, {
+      actionsResolved: (story.actions ?? []).length,
+    });
     res.json({ story, message: '3 Amigos complete — next: AC generation and QA approval' });
   });
 
@@ -233,6 +244,7 @@ export function buildRouter(repo: Repo): Router {
     story.status = 'in_readiness_review';
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
+    repo.appendAudit('three_amigos.reopened', `story:${story.jiraKey ?? story.id}`, {});
     res.json({ story, message: 'Reopened — story is back in readiness review' });
   });
 
@@ -284,6 +296,7 @@ export function buildRouter(repo: Repo): Router {
     }
     const scenarios = repo.scenariosFor(story.id).map((s) => ({ ...s, approved: true }));
     for (const s of scenarios) repo.saveScenario(s);
+    repo.appendAudit('ac.approved', `story:${story.jiraKey ?? story.id}`, { scenarios: scenarios.length });
     story.status = 'ready_for_dev';
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
@@ -317,6 +330,7 @@ export function buildRouter(repo: Repo): Router {
         story.jiraKey,
         formatAcComment(scenarios, scenarios[0]?.source ?? 'template'),
       );
+      repo.appendAudit('jira.ac_pushed', `story:${story.jiraKey}`, { scenarios: scenarios.length, commentId: comment.id });
       res.json({
         pushed: scenarios.length,
         jiraKey: story.jiraKey,
@@ -369,6 +383,7 @@ export function buildRouter(repo: Repo): Router {
     }
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
+    repo.appendAudit('jira.actions_pushed', `story:${story.jiraKey}`, { subtasks: created.map((c) => c.jiraKey) });
     res.json({ created, url: `${cfg.baseUrl}/browse/${story.jiraKey}` });
   });
 
@@ -394,6 +409,7 @@ export function buildRouter(repo: Repo): Router {
     }
     try {
       const result = await transitionJiraIssue(cfg, story.jiraKey, to);
+      repo.appendAudit('jira.transitioned', `story:${story.jiraKey}`, { to: result.transitioned });
       res.json({ jiraKey: story.jiraKey, ...result });
     } catch (err) {
       res.status(502).json({ error: (err as Error).message });
@@ -418,6 +434,10 @@ export function buildRouter(repo: Repo): Router {
     }
     story.dodChecks = { ...story.dodChecks, ...(req.body?.checks ?? {}) };
     const result = devSelfCertify(story.type, story.dodChecks);
+    repo.appendAudit('dod.self_certified', `story:${story.jiraKey ?? story.id}`, {
+      complete: result.complete,
+      missing: result.missing.map((m) => m.id),
+    });
     story.status = result.complete ? 'qe_verification' : 'dev_self_certification';
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
@@ -436,6 +456,10 @@ export function buildRouter(repo: Repo): Router {
     }
     story.dodVerified = { ...story.dodVerified, ...(req.body?.verified ?? {}) };
     const result = qeVerify(story.type, story.dodVerified);
+    repo.appendAudit('dod.qe_verified', `story:${story.jiraKey ?? story.id}`, {
+      passed: result.passed,
+      unverified: result.unverified.map((u) => u.id),
+    });
     story.status = result.passed ? 'ready_for_release' : 'qe_verification';
     story.updatedAt = new Date().toISOString();
     repo.saveStory(story);
@@ -570,7 +594,56 @@ export function buildRouter(repo: Repo): Router {
     res.json(pack);
   });
 
+  // ---------------- Audit trail ----------------
+  r.get('/audit', (_req, res) => {
+    res.json({ entries: repo.listAudit(), chain: repo.verifyAuditChain() });
+  });
+
+  // ---------------- Zephyr Scale sync ----------------
+  r.get('/zephyr/status', (_req, res) => {
+    const cfg = zephyrConfigFromEnv();
+    res.json({
+      configured: cfg !== null,
+      projectKey: cfg?.projectKey ?? null,
+      hint: cfg ? null : 'Set ZEPHYR_API_TOKEN (and optionally ZEPHYR_PROJECT_KEY) to sync test cases and executions',
+    });
+  });
+
+  r.post('/zephyr/sync', async (_req, res) => {
+    const cfg = zephyrConfigFromEnv();
+    if (!cfg) {
+      res.status(503).json({ error: 'Zephyr not configured — set ZEPHYR_API_TOKEN in .env' });
+      return;
+    }
+    try {
+      const result = await syncFromZephyr(cfg);
+      for (const t of result.tests) repo.saveTest(t);
+      repo.appendAudit('zephyr.synced', `project:${cfg.projectKey}`, {
+        testCases: result.caseCount,
+        executions: result.executionCount,
+      });
+      res.json({ synced: result.tests.length, executions: result.executionCount, projectKey: cfg.projectKey });
+    } catch (err) {
+      res.status(502).json({ error: `Zephyr sync failed: ${(err as Error).message}` });
+    }
+  });
+
   // ---------------- Go/No-Go (§8) ----------------
+  /** Auto-populated scorecard inputs derived from live portal data, with evidence. */
+  r.get('/gonogo/live', (_req, res) => {
+    const stories = repo.listStories();
+    const storiesWithAc = new Set(stories.filter((s) => repo.scenariosFor(s.id).length > 0).map((s) => s.id));
+    res.json(
+      computeLiveGonogo({
+        stories,
+        defects: repo.listDefects(),
+        tests: repo.listTests(),
+        risks: repo.listRisks(),
+        storiesWithAc,
+      }),
+    );
+  });
+
   r.post('/gonogo', (req, res) => {
     const blockers: HardBlockerInput = {
       criticalBugsOpen: Number(req.body?.blockers?.criticalBugsOpen ?? 0),
@@ -588,7 +661,15 @@ export function buildRouter(repo: Repo): Router {
       securityScan: Number(s.securityScan ?? 0),
       performanceBudget: Number(s.performanceBudget ?? 0),
     };
-    res.json(computeScorecard(blockers, signals));
+    const scorecard = computeScorecard(blockers, signals);
+    repo.appendAudit('gonogo.computed', 'release:current', {
+      score: scorecard.score,
+      recommendation: scorecard.recommendation,
+      blocked: scorecard.blocked,
+      blockers,
+      signals,
+    });
+    res.json(scorecard);
   });
 
   // ---------------- Risk-Based Testing framework ----------------

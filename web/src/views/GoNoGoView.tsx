@@ -28,6 +28,27 @@ export default function GoNoGoView() {
   const [poSignOff, setPoSignOff] = useState(true);
   const [card, setCard] = useState<Scorecard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [evidence, setEvidence] = useState<Record<string, string> | null>(null);
+  const [blockerNotes, setBlockerNotes] = useState<string[]>([]);
+  const [autoBusy, setAutoBusy] = useState(false);
+
+  const autoPopulate = async () => {
+    setAutoBusy(true);
+    setError(null);
+    try {
+      const live = await fetch('/api/gonogo/live').then((r) => r.json());
+      setSignals(Object.fromEntries(Object.entries(live.signals).map(([k, v]) => [k, (v as { value: number }).value])));
+      setCriticalBugs(live.blockers.criticalBugsOpen);
+      setP1Passing(live.blockers.p1SmokeAllPassing);
+      setPoSignOff(false); // always a human decision
+      setEvidence(Object.fromEntries(Object.entries(live.signals).map(([k, v]) => [k, (v as { evidence: string }).evidence])));
+      setBlockerNotes(live.blockers.notes);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAutoBusy(false);
+    }
+  };
 
   const compute = async () => {
     try {
@@ -46,6 +67,15 @@ export default function GoNoGoView() {
     <section className="panel">
       <h2>Go / No-Go Scorecard</h2>
       <p className="hint">System recommends; QE Lead, PO, and Release Manager approve. Hard blockers gate the release outright.</p>
+      <p>
+        <button className="action" onClick={autoPopulate} disabled={autoBusy}>
+          {autoBusy ? 'Deriving…' : 'Auto-populate from live portal data'}
+        </button>{' '}
+        <span className="hint">Fills every signal from stories, tests, defects and risks — with evidence. PO sign-off stays manual.</span>
+      </p>
+      {blockerNotes.length > 0 && (
+        <ul className="reasons">{blockerNotes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+      )}
       {error && <p role="alert" className="badge bad">{error}</p>}
 
       <div className="grid2">
@@ -68,16 +98,19 @@ export default function GoNoGoView() {
         <fieldset>
           <legend>Quality signals (0–100)</legend>
           {SIGNALS.map((s) => (
-            <label className="row" key={s.key}>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={signals[s.key]}
-                onChange={(e) => setSignals((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
-              />
-              {s.label}
-            </label>
+            <div key={s.key}>
+              <label className="row">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={signals[s.key]}
+                  onChange={(e) => setSignals((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
+                />
+                {s.label}
+              </label>
+              {evidence?.[s.key] && <div className="hint" style={{ margin: '0 0 6px 4px' }}>↳ {evidence[s.key]}</div>}
+            </div>
           ))}
         </fieldset>
       </div>

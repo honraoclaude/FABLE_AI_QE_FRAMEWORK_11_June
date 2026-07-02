@@ -16,6 +16,7 @@ const TABS = [
   'Metrics',
   'AI Insights',
   'Reports',
+  'Audit Trail',
   'Settings',
 ];
 

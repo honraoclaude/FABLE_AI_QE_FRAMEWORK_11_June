@@ -39,6 +39,24 @@ export default function RegressionView() {
   const [kind, setKind] = useState<'standard' | 'major'>('standard');
   const [pack, setPack] = useState<RegressionPack | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [zephyrMsg, setZephyrMsg] = useState<string | null>(null);
+  const [zephyrBusy, setZephyrBusy] = useState(false);
+
+  const syncZephyr = async () => {
+    setZephyrBusy(true);
+    setZephyrMsg('Syncing from Zephyr Scale…');
+    try {
+      const res = await fetch('/api/zephyr/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const body = await res.json();
+      setZephyrMsg(res.ok
+        ? `Synced ${body.synced} test case(s) with ${body.executions} execution(s) from Zephyr project ${body.projectKey} — rebuild the pack to include them`
+        : String(body.error));
+    } catch (e) {
+      setZephyrMsg(String(e));
+    } finally {
+      setZephyrBusy(false);
+    }
+  };
 
   const build = async () => {
     try {
@@ -57,6 +75,13 @@ export default function RegressionView() {
         regression-tagged AC.
       </p>
       {error && <p role="alert" className="badge bad">{error}</p>}
+      <p>
+        <button className="action ghost" onClick={syncZephyr} disabled={zephyrBusy}>
+          {zephyrBusy ? 'Syncing…' : 'Sync test cases from Zephyr Scale'}
+        </button>{' '}
+        <span className="hint">Pulls real test cases + execution history (pass/fail/flaky) into the pack builder.</span>
+      </p>
+      {zephyrMsg && <p className="hint" role="status">{zephyrMsg}</p>}
 
       <fieldset>
         <legend>Release inputs</legend>

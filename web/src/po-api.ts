@@ -91,6 +91,35 @@ export interface Trends {
   deltas: Record<string, number> | null;
 }
 
+export interface StoryDrift {
+  id: string;
+  firstSeen: string;
+  snapshotsObserved: number;
+  initialHealth: number;
+  latestHealth: number;
+  healthDelta: number;
+  initialStatus: string;
+  latestStatus: string;
+  stuckInRefinement: boolean;
+  delivered: boolean | null;
+}
+
+export interface PredictionReport {
+  snapshots: number;
+  spanDays: number;
+  stories: StoryDrift[];
+  summary: { improved: number; degraded: number; unchanged: number; stuckInRefinement: number; avgHealthDelta: number };
+  recalibrationHints: string[];
+  note: string | null;
+}
+
+export interface ComplexityFinding {
+  storyId: string;
+  complexityScore: number;
+  redFlags: string[];
+  reasoning: string;
+}
+
 export interface CopilotMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -207,6 +236,12 @@ export const po = {
   jiraSync: () => post<{ synced: number; jql: string; source: string }>('/jira/sync', {}),
   jiraReset: () => post<{ source: string; count: number }>('/jira/reset', {}),
   trends: () => get<Trends>('/trends'),
+  predictionAccuracy: () => get<PredictionReport>('/prediction-accuracy'),
+  aiConflict: (id: string) => post<ConflictResolution>(`/stories/${id}/ai/conflict`, {}),
+  aiDecompose: (id: string) => post<Refinement>(`/stories/${id}/ai/decompose`, {}),
+  aiComplexity: (id: string) => post<ComplexityFinding>(`/stories/${id}/ai/complexity`, {}),
+  aiResults: () =>
+    get<{ conflicts: Record<string, ConflictResolution>; refinements: Record<string, Refinement>; complexity: Record<string, ComplexityFinding> }>('/ai/results'),
   copilot: (messages: { role: 'user' | 'assistant'; content: string }[]) =>
     post<{ reply: string; toolTrace: { tool: string; input: Record<string, unknown> }[] }>('/copilot', { messages }),
   roadmap: (capacity: number) => get<Roadmap>(`/roadmap?capacity=${capacity}`),

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   po,
   type Backlog,
+  type ComplexityFinding,
   type ConflictResolution,
   type Fairness,
   type JiraPoStatus,
+  type PredictionReport,
   type Refinement,
   type Roadmap,
   type Scenario,
@@ -35,6 +37,7 @@ const SUBTABS = [
   ['fairness', 'Stakeholder Fairness'],
   ['refine', 'Story Refinement'],
   ['conflicts', 'Conflict Resolver'],
+  ['accuracy', 'Prediction Accuracy'],
 ] as const;
 type SubTab = (typeof SUBTABS)[number][0];
 
@@ -68,6 +71,7 @@ export default function ProductOwnerView() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [trends, setTrends] = useState<Trends | null>(null);
+  const [complexity, setComplexity] = useState<Record<string, ComplexityFinding>>({});
 
   const [capacity, setCapacity] = useState(10);
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
@@ -81,6 +85,7 @@ export default function ProductOwnerView() {
     po.conflicts().then(setConflicts).catch(() => undefined);
     po.jiraStatus().then(setJira).catch(() => undefined);
     po.trends().then(setTrends).catch(() => undefined);
+    po.aiResults().then((r) => setComplexity(r.complexity)).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -185,8 +190,13 @@ export default function ProductOwnerView() {
           {tab === 'tension' && <Tension backlog={backlog} stories={stories} />}
           {tab === 'outcomes' && <OutcomeMap stories={stories} outcomes={outcomes} />}
           {tab === 'fairness' && <FairnessView fairness={fairness} />}
-          {tab === 'refine' && <Refine stories={stories} refinements={refinements} />}
-          {tab === 'conflicts' && <Conflicts conflicts={conflicts} />}
+          {tab === 'refine' && (
+            <Refine stories={stories} refinements={refinements} complexity={complexity} source={backlog.source} onChanged={reloadAll} />
+          )}
+          {tab === 'conflicts' && (
+            <Conflicts conflicts={conflicts} stories={stories} source={backlog.source} onChanged={reloadAll} />
+          )}
+          {tab === 'accuracy' && <PredictionAccuracy />}
         </>
       )}
     </section>
@@ -496,6 +506,7 @@ function RoadmapView({ roadmap, capacity, setCapacity, outcomes }: {
         <input type="number" min={1} max={40} value={capacity} onChange={(e) => setCapacity(Number(e.target.value))} />
       </label>
       <p className="hint">{roadmap.deliverySummary}</p>
+      <Gantt roadmap={roadmap} />
       {roadmap.sprints.map((sp) => (
         <div className="panel" key={sp.sprint} style={{ marginBottom: '0.6rem' }}>
           <h4>Sprint {sp.sprint} <span className="badge muted">{sp.effort}/{sp.capacity} wk</span></h4>
@@ -520,6 +531,109 @@ function RoadmapView({ roadmap, capacity, setCapacity, outcomes }: {
         {Object.entries(roadmap.outcomeSprints).map(([oid, sprint]) => (
           <li key={oid}>{outcomes.find((o) => o.id === oid)?.label ?? oid}: delivered by Sprint {sprint}</li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+// ── Roadmap Gantt (quarterly bands) ─────────────────────────────────────────
+function Gantt({ roadmap }: { roadmap: Roadmap }) {
+  const rows = roadmap.sprints.flatMap((sp) => sp.stories.map((s) => ({ ...s, sprint: sp.sprint })));
+  const sprints = roadmap.sprints.length;
+  const colW = 84, rowH = 26, labelW = 210;
+  const W = labelW + sprints * colW + 20;
+  const H = rows.length * rowH + 58;
+  const SPRINTS_PER_QUARTER = 6; // ~2-week sprints → 6 per quarter
+
+  return (
+    <div className="svgwrap panel" style={{ padding: 12 }} tabIndex={0} aria-label="Roadmap Gantt chart">
+      <svg width={W} height={H} role="img" aria-label="Story schedule across sprints with quarter bands">
+        {/* quarter bands */}
+        {Array.from({ length: Math.ceil(sprints / SPRINTS_PER_QUARTER) }, (_, q) => (
+          <g key={q}>
+            <rect
+              x={labelW + q * SPRINTS_PER_QUARTER * colW} y={0}
+              width={Math.min(SPRINTS_PER_QUARTER, sprints - q * SPRINTS_PER_QUARTER) * colW} height={H}
+              fill={q % 2 === 0 ? 'transparent' : 'var(--surface-2)'} opacity={0.5}
+            />
+            <text x={labelW + q * SPRINTS_PER_QUARTER * colW + 6} y={16} fontSize="11" fontWeight={700} fill="var(--muted)">Q{q + 1}</text>
+          </g>
+        ))}
+        {/* sprint columns */}
+        {roadmap.sprints.map((sp, i) => (
+          <text key={sp.sprint} x={labelW + i * colW + colW / 2} y={34} fontSize="10.5" textAnchor="middle" fill="var(--muted)">
+            S{sp.sprint} · {sp.effort}w
+          </text>
+        ))}
+        {/* rows */}
+        {rows.map((s, i) => {
+          const y = 46 + i * rowH;
+          const x = labelW + (s.sprint - 1) * colW;
+          const w = Math.max(20, Math.min(colW * 2, (s.effort / 10) * colW * 2));
+          return (
+            <g key={s.id}>
+              <text x={4} y={y + 13} fontSize="11" fill="var(--ink-strong)">{s.id} {s.title.slice(0, 24)}</text>
+              <rect x={x + 4} y={y + 2} width={w} height={rowH - 8} rx={5} fill={s.color} opacity={0.9}>
+                <title>{s.id} {s.title} — Sprint {s.sprint}, {s.effort}wk, {s.status}</title>
+              </rect>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ── Prediction Accuracy (§15) ───────────────────────────────────────────────
+function PredictionAccuracy() {
+  const [report, setReport] = useState<PredictionReport | null>(null);
+
+  useEffect(() => {
+    po.predictionAccuracy().then(setReport).catch(() => undefined);
+  }, []);
+
+  if (!report) return <div className="skeleton" style={{ height: 200 }} />;
+
+  return (
+    <div>
+      <p className="hint">
+        Framework §15 continuous improvement: compares each story's first-seen prediction (INVEST health,
+        readiness) against its latest snapshot and actual delivery, and suggests scoring recalibrations.
+        {` ${report.snapshots} snapshot(s) over ${report.spanDays} day(s).`}
+      </p>
+      {report.note && <p className="badge warn" style={{ display: 'inline-block' }}>{report.note}</p>}
+
+      {report.stories.length > 0 && (
+        <>
+          <div className="kpis" style={{ margin: '12px 0' }}>
+            {([['Improved', report.summary.improved], ['Degraded', report.summary.degraded], ['Unchanged', report.summary.unchanged], ['Stuck in refinement', report.summary.stuckInRefinement], ['Avg health drift', `${report.summary.avgHealthDelta > 0 ? '+' : ''}${report.summary.avgHealthDelta}%`]] as const).map(([l, v]) => (
+              <div className="kpi" key={l}><div className="num">{v}</div><div className="lbl">{l}</div></div>
+            ))}
+          </div>
+          <div className="panel" style={{ padding: 0 }}>
+            <table>
+              <thead>
+                <tr><th scope="col">Story</th><th scope="col">Predicted (first seen)</th><th scope="col">Latest</th><th scope="col">Drift</th><th scope="col">Delivered</th></tr>
+              </thead>
+              <tbody>
+                {report.stories.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.id} {s.stuckInRefinement && <span className="badge warn">stuck</span>}</td>
+                    <td className="hint">{s.initialHealth}% · {s.initialStatus}</td>
+                    <td className="hint">{s.latestHealth}% · {s.latestStatus}</td>
+                    <td><span className={`badge ${s.healthDelta > 0 ? 'ok' : s.healthDelta < 0 ? 'bad' : 'muted'}`}>{s.healthDelta > 0 ? '+' : ''}{s.healthDelta}%</span></td>
+                    <td>{s.delivered === null ? <span className="badge muted">unknown</span> : s.delivered ? <span className="badge ok">yes</span> : <span className="badge muted">not yet</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      <h3>Recalibration hints</h3>
+      <ul className="reasons">
+        {report.recalibrationHints.map((h, i) => <li key={i}>{h}</li>)}
       </ul>
     </div>
   );
@@ -700,8 +814,31 @@ function FairnessView({ fairness }: { fairness: Fairness | null }) {
 }
 
 // ── Story Refinement ────────────────────────────────────────────────────────
-function Refine({ stories, refinements }: { stories: ScoredStory[]; refinements: Record<string, Refinement> }) {
+function Refine({ stories, refinements, complexity, source, onChanged }: {
+  stories: ScoredStory[];
+  refinements: Record<string, Refinement>;
+  complexity: Record<string, ComplexityFinding>;
+  source: 'jira' | 'sample';
+  onChanged: () => void;
+}) {
   const [filter, setFilter] = useState<'all' | 'decompose' | 'ready'>('all');
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [aiMsg, setAiMsg] = useState<Record<string, string>>({});
+
+  const runAi = async (id: string, kind: 'decompose' | 'complexity') => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    setAiMsg((m) => ({ ...m, [id]: `Running ${kind === 'decompose' ? 'AI decomposition' : 'hidden-complexity detection'}…` }));
+    try {
+      if (kind === 'decompose') await po.aiDecompose(id);
+      else await po.aiComplexity(id);
+      setAiMsg((m) => ({ ...m, [id]: '' }));
+      onChanged();
+    } catch (e) {
+      setAiMsg((m) => ({ ...m, [id]: String(e) }));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
   const list = stories.filter((s) => {
     const r = refinements[s.id];
     if (!r) return false;
@@ -718,10 +855,33 @@ function Refine({ stories, refinements }: { stories: ScoredStory[]; refinements:
       </div>
       {list.map((s) => {
         const r = refinements[s.id]!;
+        const cx = complexity[s.id];
         return (
           <div className="panel" key={s.id} style={{ marginBottom: '0.6rem' }}>
-            <h4>{s.id} {s.title} {r.shouldDecompose ? <span className="badge bad">Decompose ({r.subStories.length} sub-stories)</span> : <span className="badge ok">Sprint ready</span>}</h4>
+            <h4>
+              {s.id} {s.title}{' '}
+              {r.shouldDecompose ? <span className="badge bad">Decompose ({r.subStories.length} sub-stories)</span> : <span className="badge ok">Sprint ready</span>}{' '}
+              {cx && (
+                <span className={`badge ${cx.complexityScore >= 7 ? 'bad' : cx.complexityScore >= 4 ? 'warn' : 'ok'}`} title={cx.reasoning}>
+                  hidden complexity {cx.complexityScore}/10
+                </span>
+              )}
+            </h4>
             <p className="hint">{r.reason}</p>
+            {cx && cx.redFlags.length > 0 && (
+              <div className="chips">{cx.redFlags.map((f, i) => <span key={i} className="badge warn">⚑ {f}</span>)}</div>
+            )}
+            {source === 'jira' && (
+              <p>
+                <button className="action ghost" onClick={() => runAi(s.id, 'decompose')} disabled={busy[s.id]}>
+                  {busy[s.id] ? 'Working…' : 'Decompose with AI'}
+                </button>{' '}
+                <button className="action ghost" onClick={() => runAi(s.id, 'complexity')} disabled={busy[s.id]}>
+                  Detect hidden complexity
+                </button>
+                {aiMsg[s.id] && <span className="hint" role="status"> {aiMsg[s.id]}</span>}
+              </p>
+            )}
             {r.subStories.length > 0 && (
               <table>
                 <thead><tr><th scope="col">Sub-story</th><th scope="col">Effort</th><th scope="col">Priority</th><th scope="col">Rationale</th></tr></thead>
@@ -846,12 +1006,49 @@ function Copilot() {
 }
 
 // ── Conflict Resolver ───────────────────────────────────────────────────────
-function Conflicts({ conflicts }: { conflicts: ConflictResolution[] }) {
+function Conflicts({ conflicts, stories, source, onChanged }: {
+  conflicts: ConflictResolution[];
+  stories: ScoredStory[];
+  source: 'jira' | 'sample';
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+  const resolvedIds = new Set(conflicts.map((c) => c.storyId));
+  const candidates = stories.filter((s) => s.conflictIdx >= 25 && !resolvedIds.has(s.id));
+
+  const generate = async (id: string) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    setMsg(`Generating resolution for ${id} with AI…`);
+    try {
+      await po.aiConflict(id);
+      setMsg(null);
+      onChanged();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
   return (
     <div>
       <p className="hint">High-conflict stories with each stakeholder's position, two resolution options, and a recommended path.</p>
+      {source === 'jira' && candidates.length > 0 && (
+        <div className="panel">
+          <h4 style={{ marginTop: 0 }}>Stories with stakeholder conflict and no resolution yet</h4>
+          <div className="chips">
+            {candidates.map((s) => (
+              <button key={s.id} className="action ghost" onClick={() => generate(s.id)} disabled={busy[s.id]}>
+                {busy[s.id] ? 'Generating…' : `Generate for ${s.id} (${s.conflictIdx}% conflict)`}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {msg && <p className="hint" role="status">{msg}</p>}
       {conflicts.length === 0 && (
-        <p className="hint">No authored conflict resolutions for the current backlog. These are hand-authored for the sample backlog; for Jira-synced stories, use the Tension Board to see computed stakeholder conflict, or generate resolutions with the AI layer.</p>
+        <p className="hint">No conflict resolutions for the current backlog yet{source === 'jira' ? ' — generate them with AI above (requires AI enabled), or use the Tension Board for computed conflict.' : '.'}</p>
       )}
       {conflicts.map((c) => (
         <div className="panel" key={c.storyId} style={{ marginBottom: '0.7rem' }}>
